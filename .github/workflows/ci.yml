@@ -1,8 +1,8 @@
 name: ci
 
-# Pull requests and main run every check. Pushes to main also publish the
-# <version>-dev.<sha> image; a vX.Y.Z tag publishes the release (image, chart,
-# signatures, binaries).
+# Pull requests and main run every check; main also builds and scans the
+# image without pushing it. Only a vX.Y.Z tag publishes: image, chart,
+# signatures and the GitHub release with the binaries.
 on:
   push:
     branches: [main]
@@ -204,13 +204,13 @@ jobs:
           retention-days: 30
 
   # ---------------------------------------------------------------------------
-  # Container image, pushed to ghcr.io/vasops/vulnwatch.
+  # Container image, ghcr.io/vasops/vulnwatch.
   #
-  # main:  <version>-dev.<sha> and main (rolling)
-  # vX.Y.Z tags: X.Y.Z (what the chart's appVersion points to) and vX.Y.Z; no
-  # latest, deployments pin a version or digest
+  # main:  built and handed to scan-image as an artifact, never pushed
+  # vX.Y.Z tags: pushed as X.Y.Z (what the chart's appVersion points to) and
+  # vX.Y.Z; no latest, deployments pin a version or digest
   #
-  # Pushed only after every lint, test and security job has passed.
+  # Built only after every lint, test and security job has passed.
   # ---------------------------------------------------------------------------
   image:
     needs: [version, lint, lint-chart, test, govulncheck, capslock, trivy]
@@ -224,10 +224,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Log in to ghcr.io
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
       - name: Build
         env:
           VERSION: ${{ needs.version.outputs.version }}
@@ -236,17 +232,27 @@ jobs:
             --build-arg VERSION="$VERSION" --build-arg COMMIT="${GITHUB_SHA::8}" \
             --build-arg DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -t "$IMAGE:build" .
+      # main: the image goes to scan-image as a file, not to the registry.
+      - name: Save the image for the scan
+        if: github.ref_type != 'tag'
+        run: docker save "$IMAGE:build" -o image.tar
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: github.ref_type != 'tag'
+        with:
+          name: image
+          path: image.tar
+          if-no-files-found: error
+          retention-days: 1
+      - name: Log in to ghcr.io
+        if: github.ref_type == 'tag'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
       - name: Push
         id: push
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
+        if: github.ref_type == 'tag'
         run: |
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
-            TAGS="${GITHUB_REF_NAME#v} $GITHUB_REF_NAME"
-          else
-            TAGS="$VERSION main"
-          fi
-          for t in $TAGS; do
+          for t in "${GITHUB_REF_NAME#v}" "$GITHUB_REF_NAME"; do
             docker tag "$IMAGE:build" "$IMAGE:$t"
             docker push "$IMAGE:$t"
           done
@@ -259,6 +265,7 @@ jobs:
   # CycloneDX SBOM of the pushed image (packages and Go modules).
   sbom-image:
     needs: [image]
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     container: aquasec/trivy:0.76.1
     permissions:
@@ -277,8 +284,9 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-  # The pushed image, base and Go standard library included (the trivy fs scan
-  # sees only go.mod): fails on HIGH/CRITICAL vulnerabilities with a fix.
+  # The image, base and Go standard library included (the trivy fs scan sees
+  # only go.mod): fails on HIGH/CRITICAL vulnerabilities with a fix. On main
+  # it reads the image file from the image job, on a tag the pushed image.
   # release-chart needs it, so a vulnerable image never gets a chart.
   scan-image:
     needs: [image]
@@ -292,7 +300,16 @@ jobs:
       TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
       DIGEST: ${{ needs.image.outputs.digest }}
     steps:
-      - run: trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "$IMAGE@$DIGEST"
+      - name: Scan the pushed image
+        if: github.ref_type == 'tag'
+        run: trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "$IMAGE@$DIGEST"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: github.ref_type != 'tag'
+        with:
+          name: image
+      - name: Scan the built image
+        if: github.ref_type != 'tag'
+        run: trivy image --input image.tar --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed
 
   # Keyless cosign signature and SBOM attestation on the image digest, for
   # admission policies (Kyverno, policy-controller). The certificate names
