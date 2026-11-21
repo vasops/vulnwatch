@@ -206,8 +206,10 @@ Found a vulnerability in vulnwatch itself? Report it privately, see
 Issues and pull requests are welcome. [`CONTRIBUTING.md`](CONTRIBUTING.md)
 has the development setup and the conventions.
 
+## Contributors
+
 <a href="https://github.com/vasops/vulnwatch/graphs/contributors">
-  <img alt="Contributors" src="https://contrib.rocks/image?repo=vasops/vulnwatch">
+  <img alt="Contributors" src="https://contrib.rocks/image?repo=vasops/vulnwatch&max=100">
 </a>
 
 ## License
