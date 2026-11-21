@@ -1,0 +1,46 @@
+vulnwatch report
+Window: 2026-10-10 06:00 → 2026-10-12 06:00 UTC
+Products: argocd 3.x, keycloak 26.x, longhorn 1.8.1
+
+Summary: P1 1 · P2 0 · P3 1 · P4 0 | not relevant 1 | below threshold 2 | already reported 5 | still open 2
+
+== Full history checked · 3 products ==
+New products and changed versions are checked against every known advisory; what affects us is listed under Still open.
+  keycloak 26.x (version changed)  412 advisories checked · 3 affected · 2 depend on the exact version · 1 exploited (KEV)
+  argocd 3.x (new)  80 advisories checked · incomplete: a source failed, checked again next run
+  + 1 with nothing affecting the deployed version: longhorn
+
+== P1 · Act today ==
+
+  keycloak (we run 26.x)
+    CVE-2026-1001  CVSS 9.8  critical  [KEV]  [EPSS 91.2%]  match: affected
+      Fixed in: 26.1.4
+      Account takeover via crafted <redirect_uri>
+      An attacker can take over accounts by abusing redirect URI validation.
+      Action: Upgrade to 26.1.4 today.
+      NVD https://example.invalid/nvd/CVE-2026-1001 · GitHub https://example.invalid/gh/GHSA-abcd-efgh-ijkl
+      https://example.invalid/advisory/1
+      https://example.invalid/nvd/1
+
+== P3 · Next maintenance ==
+
+  argocd (we run 3.x)
+    GHSA-xxxx-yyyy-zzzz  CVSS 7.5  high  match: unknown  updated
+      Changed: fixed version released: 3.1.8
+      Fixed in: 3.1.8, 3.0.15
+      Repo server path traversal
+      Action: Check the deployed version; upgrade to a fixed version (3.1.8, 3.0.15) if affected.
+      (not triaged: LLM output invalid or unavailable)
+      GitHub https://example.invalid/gh/GHSA-xxxx-yyyy-zzzz
+      https://example.invalid/advisory/2
+
+== Still open · 2 ==
+Reported earlier and still affecting the versions in stack.yaml.
+  P1  keycloak 26.x  CVE-2026-0900  high 8.8  [KEV]  open 14d
+      NVD https://example.invalid/nvd/CVE-2026-0900 · GitHub https://example.invalid/gh/GHSA-mnop-qrst-uvwx
+  P3  argocd 3.x  CVE-2026-0800  medium 6.5  fixed in 3.1.2  open 30d  (depends on exact version)
+      NVD https://example.invalid/nvd/CVE-2026-0800
+  + 3 findings not listed: they give no affected versions, so vulnwatch can't tell whether ours is affected (or the product is tracked with "*").
+
+Warnings:
+  ! nvd/keycloak: GET https://example.invalid: HTTP 503

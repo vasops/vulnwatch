@@ -1,0 +1,12 @@
+# Stack from a ConfigMap managed elsewhere; tokens from several Secrets.
+existingStackConfigMap:
+  name: platform-stack
+  key: vulnwatch-stack.yaml
+secretEnv:
+  GITHUB_TOKEN: { name: github-readonly, key: token }
+  SLACK_BOT_TOKEN: { name: slack-vulnwatch, key: bot-token, optional: true }
+envFromSecrets: [vulnwatch-anthropic]
+envFrom:
+  - configMapRef: { name: vulnwatch-extra-env }
+bootstrap:
+  enabled: true

@@ -1,0 +1,1126 @@
+# vulnwatch sources file: WHERE to look. Only `sources` (advisory source
+# endpoints and limits), `catalog` (where to look per product) and
+# `helm_charts` (which products a chart deploys) belong here. Everything else
+# (HTTP client, run, triage, outputs, product defaults) is in config.yaml;
+# vulnwatch rejects a key that is in the wrong file.
+#
+# Required input (--sources / VULNWATCH_SOURCES, default ./sources.yaml).
+# Nothing is built into the binary. Copy this file and adapt it.
+#
+# --sources can be repeated (VULNWATCH_SOURCES takes a comma-separated list).
+# Later files are deep-merged on top of earlier ones, see sources-override.yaml:
+#   - maps merge key by key (later file wins)
+#   - lists REPLACE the earlier list (they are not appended)
+#   - any source or catalog product can be switched off with `enabled: false`
+#
+# Every catalog selector is marked [v] = verified against the live source on
+# 2026-10-12, 2026-10-27 or 2026-11-04:
+#   ghsa: the repo publishes repository-level GitHub security advisories
+#   osv:  the package query returns advisories
+#   nvd:  the CPE match string (virtualMatchString) matches CVEs
+#   rss:  the feed is reachable and still updated
+# [r] = the GitHub repo exists but has published no advisories yet; it is
+# kept so the first one is caught. Products with only [r] selectors have no
+# advisory history anywhere (checked GHSA, OSV and NVD).
+
+version: 1
+
+# ---------------------------------------------------------------------------
+# Global sources: one definition each, shared by all products.
+# Secrets are never stored here, only the NAME of the env var that holds them.
+# ---------------------------------------------------------------------------
+sources:
+  ghsa:
+    enabled: true
+    base_url: https://api.github.com
+    token_env: GITHUB_TOKEN
+    api_version: "2022-11-28"   # X-GitHub-Api-Version header
+    per_page: 100
+    detail_url: https://github.com/advisories/{id}   # report link; {id} = GHSA ID
+    # Repository-level advisories only. Package-level GHSA advisories are
+    # already covered by OSV, which imports the GitHub Advisory Database.
+
+  osv:
+    enabled: true
+    base_url: https://api.osv.dev/v1
+
+  nvd:
+    enabled: true
+    base_url: https://services.nvd.nist.gov/rest/json/cves/2.0
+    api_key_env: NVD_API_KEY
+    # NVD throttles hard without a key; space requests accordingly.
+    request_interval: 6s
+    request_interval_with_key: 1s
+    max_window: 120d            # NVD rejects longer modified-date windows
+    results_per_page: 2000
+    detail_url: https://nvd.nist.gov/vuln/detail/{id}   # report link; {id} = CVE ID
+    max_in_flight: 2            # requests at once, retries included: NVD turns parallel ones away with 503
+    timeout: 90s                # per request: a busy NVD takes up to a minute to answer
+    budget: 10m                 # NVD time per run; what is left is asked next run (below run.deadline)
+
+  # CVE records from the CVE program (cvelistV5), with CISA's Vulnrichment
+  # (CVSS, CPEs, SSVC) inside: the CNA's own affected versions from day 0.
+  # The first run reads the full list (~660 MB download) into a match index
+  # in the state DB; later runs read the daily change archives.
+  cvelist:
+    enabled: true
+    releases_url: https://api.github.com/repos/CVEProject/cvelistV5/releases
+    records_url: https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves
+    work_dir: ""                # downloads during a run; empty: $TMPDIR/vulnwatch-cvelist
+    token_env: GITHUB_TOKEN     # optional; only for listing releases
+
+  rss:
+    enabled: true
+
+  # `vulnwatch news` (the chart's news CronJob, hourly): security news where
+  # the vulnerabilities everyone talks about show up, often before an
+  # advisory names a product. Each new item is posted once to the news
+  # channel, with the stack products its title names; not matched by version.
+  # A feed read for the first time is only remembered. Feeds are keyed by
+  # name: renaming one posts nothing and forgets what it posted.
+  news:
+    enabled: true
+    feeds:
+      # A few bulletins a year, only for the flaws with industry-wide impact
+      # (Log4Shell, regreSSHion, XZ, Java4Shell). No feed: the list page.
+      - name: Red Hat Security Bulletins
+        url: https://access.redhat.com/security/vulnerabilities
+        format: rhsb
+      # CERT-EU's advisories: two or three a month, only for critical and
+      # high-impact flaws (Java4Shell, NetScaler, GitLab). Not CISA's alerts:
+      # cisa.gov answers cloud IPs with HTTP 403.
+      - name: CERT-EU Security Advisories
+        url: https://cert.europa.eu/publications/security-advisories-rss
+        format: rss
+
+  kubernetes_cve_feed:
+    enabled: true
+    url: https://kubernetes.io/docs/reference/issues-security/official-cve-feed/index.json
+    # Findings from this feed are attributed to these catalog products.
+    products: [kubernetes, rke2]
+
+  kev:                          # enrichment only
+    enabled: true
+    # CISA's own GitHub copy, updated daily; cisa.gov blocks many cloud IPs (HTTP 403).
+    url: https://raw.githubusercontent.com/cisagov/kev-data/develop/known_exploited_vulnerabilities.json
+    cache_ttl: 12h
+
+  epss:                         # enrichment only
+    enabled: true
+    base_url: https://api.first.org/data/v1/epss
+    batch_size: 100
+
+  # Red Hat's rating and statement (e.g. "only servers with HTTP/2 enabled are
+  # affected") for CVEs already found; context for triage and the P1 card.
+  redhat:                       # enrichment only
+    enabled: true
+    base_url: https://access.redhat.com/hydra/rest/securitydata
+    batch_size: 50
+    max_details: 100            # statements fetched per run, KEV and EPSS first
+
+  # The nodes' kernel (os: in stack.yaml) in the distribution's security
+  # tracker (Debian, Ubuntu), queried through OSV with the running versions.
+  # The tracker lists hundreds of kernel fixes per release, so a fix is only
+  # reported when it is KEV-listed or has EPSS >= min_epss.
+  os:
+    enabled: true
+    min_epss: 0.1
+
+  # Vulnerable packages trivy-operator found in the running images, attached
+  # to products by the catalog's images. Works only inside the cluster: the
+  # Helm chart's trivy.enabled turns it on and grants read access to the
+  # VulnerabilityReports.
+  trivy:
+    enabled: false
+    # Image findings without an advisory for the product are noisy. They are
+    # reported only with a fixed package version AND one of: KEV-listed,
+    # EPSS >= min_epss, severity >= min_severity (min_severity_internet for
+    # internet-facing products). Findings an advisory also reports are always
+    # kept: Trivy then confirms the vulnerable code runs.
+    min_severity: critical
+    min_severity_internet: high
+    min_epss: 0.1
+
+# ---------------------------------------------------------------------------
+# Product catalog: where to look for each product.
+# Keys are the names used in stack.yaml. OSV ecosystem names follow OSV
+# spelling (Go, Maven, PyPI, Packagist). images are the product's container
+# image repositories; `vulnwatch stack discover` maps running images to
+# products with them (any registry, and mirrors that prefix the path).
+# cvelist are the vendor/product names CNAs write in cvelistV5 records
+# (containers.cna.affected[]), matched case-insensitively; downstream
+# rebuilds with their own versions (Red Hat build of Keycloak, Enterprise
+# editions) are left out on purpose.
+# ---------------------------------------------------------------------------
+catalog:
+
+  kubernetes:
+    aliases: [k8s]
+    ghsa: []                                   # kubernetes/kubernetes publishes no repo advisories; covered by kubernetes_cve_feed
+    osv:
+      - { ecosystem: Go, package: k8s.io/kubernetes }               # [v] 87 advisories
+    nvd: ["cpe:2.3:a:kubernetes:kubernetes"]                        # [v] 61 CVEs
+    cvelist:                                                        # [v] 63 records
+      - { vendor: "Kubernetes", product: "Kubernetes" }             # 54
+      - { vendor: "Kubernetes", product: "kubelet" }                # 7
+      - { vendor: "Kubernetes", product: "kube-apiserver" }         # 2
+    rss: []
+    images:
+      - rancher/hardened-kubernetes
+      - registry.k8s.io/kube-apiserver
+      - registry.k8s.io/kube-controller-manager
+      - registry.k8s.io/kube-scheduler
+      - registry.k8s.io/kube-proxy
+
+  rke2:
+    aliases: [rancher-rke2]
+    ghsa: [rancher/rke2]                                            # [v]
+    osv:
+      - { ecosystem: Go, package: github.com/rancher/rke2 }         # [v] 3 advisories
+    nvd: ["cpe:2.3:a:suse:rancher_rke2"]                            # [v] 2 CVEs (cpe:2.3:a:rancher:rke2 matches none)
+    cvelist: [{vendor: "SUSE", product: "RKE2"}]                    # [v] 1 record
+    rss: []
+
+  containerd:
+    aliases: []                                                     # the nodes' container runtime (rke2 and k3s ship it as v2.x.y-k3s1)
+    ghsa: [containerd/containerd]                                   # [v] 33 advisories
+    osv:
+      - { ecosystem: Go, package: github.com/containerd/containerd }     # [v] 49 advisories
+      - { ecosystem: Go, package: github.com/containerd/containerd/v2 }  # [v] 30 advisories
+    nvd: ["cpe:2.3:a:linuxfoundation:containerd"]                   # [v] 22 CVEs
+    cvelist: [{vendor: "containerd", product: "containerd"}]        # [v] 26 records
+    rss: []
+
+  longhorn:
+    aliases: []
+    ghsa: [longhorn/longhorn]                                       # [v]
+    osv: []                                                         # longhorn-manager and longhorn return no OSV advisories
+    nvd: ["cpe:2.3:a:linuxfoundation:longhorn"]                     # [v] 2 CVEs (not in the CPE dictionary; matched by virtualMatchString)
+    cvelist: [{vendor: "SUSE", product: "Longhorn"}]                # [v] 2 records
+    rss: []
+    images:
+      - longhornio/longhorn-manager
+      - longhornio/longhorn-engine
+      - longhornio/longhorn-instance-manager
+      - longhornio/longhorn-share-manager
+      - longhornio/longhorn-ui
+
+  argocd:
+    aliases: [argo-cd, argo]
+    ghsa: [argoproj/argo-cd]                                        # [v]
+    osv:
+      - { ecosystem: Go, package: github.com/argoproj/argo-cd/v2 }  # [v] 83 advisories
+      - { ecosystem: Go, package: github.com/argoproj/argo-cd/v3 }  # [v] 19 advisories
+    nvd: ["cpe:2.3:a:linuxfoundation:argo-cd"]                      # [v] 3 CVEs
+    cvelist:                                                        # [v] 51 records
+      - { vendor: "argoproj", product: "argo-cd" }                  # 49
+      - { vendor: "n/a", product: "ArgoCD" }                        # 2
+    rss: []
+    images: [quay.io/argoproj/argocd]
+
+  gitlab-ce:
+    aliases: [gitlab]
+    ghsa: []                                                        # GitLab is not hosted on GitHub
+    osv: []
+    nvd: ["cpe:2.3:a:gitlab:gitlab:*:*:*:*:community:*:*:*"]       # [v] 1155 CVEs
+    cvelist:                                                        # [v] 1162 records; GitLab's CNA names CE and EE alike, so EE-only issues match too
+      - { vendor: "GitLab", product: "GitLab" }                     # 1112
+      - { vendor: "GitLab", product: "GitLab CE/EE" }               # 22
+      - { vendor: "GitLab", product: "GitLab Community and Enterprise Editions" }  # 13
+      - { vendor: "GitLab", product: "GitLab Community Edition" }   # 2
+      - { vendor: "n/a", product: "GitLab CE/EE" }                  # 9
+      - { vendor: "n/a", product: "GitLab" }                        # 6
+    rss:
+      - https://docs.gitlab.com/releases/patch-releases.xml         # [v] canonical feed; about.gitlab.com/security-releases.xml redirects here
+    images: [gitlab/gitlab-ce]
+    # Also evaluate gitlab-org/advisories-community as a structured source (v2).
+
+  gitlab-ee:
+    aliases: []                                                     # the Enterprise Edition: GitLab CE plus the paid features, versioned alike
+    ghsa: []                                                        # GitLab is not hosted on GitHub
+    osv: []
+    nvd: ["cpe:2.3:a:gitlab:gitlab:*:*:*:*:enterprise:*:*:*"]      # [v] 1421 CVEs (1180 of community, 245 EE-only)
+    cvelist:                                                        # [v] gitlab-ce's names (CE issues are in EE too) and the EE-only ones; checked 2026-11-18 on cveawg.mitre.org records
+      - { vendor: "GitLab", product: "GitLab" }
+      - { vendor: "GitLab", product: "GitLab CE/EE" }
+      - { vendor: "GitLab", product: "GitLab Community and Enterprise Editions" }
+      - { vendor: "GitLab", product: "GitLab Community Edition" }
+      - { vendor: "GitLab", product: "GitLab EE" }
+      - { vendor: "GitLab", product: "GitLab Enterprise Edition" }
+      - { vendor: "n/a", product: "GitLab CE/EE" }
+      - { vendor: "n/a", product: "GitLab EE" }
+      - { vendor: "n/a", product: "GitLab" }
+    rss:
+      - https://docs.gitlab.com/releases/patch-releases.xml         # [v] the same feed as gitlab-ce: patch releases fix both editions
+    images: [gitlab/gitlab-ee]
+
+  gitlab-runner:
+    aliases: []                                                     # the CI runner (docker executor), versioned like GitLab
+    ghsa: []                                                        # GitLab is not hosted on GitHub
+    osv: []                                                         # no OSV package (checked 2026-11-07)
+    nvd: ["cpe:2.3:a:gitlab:runner", "cpe:2.3:a:gitlab:gitlab_runner"]  # [v] 3 and 1 CVEs
+    cvelist: [{vendor: "GitLab", product: "GitLab Runner"}]         # [v] 6 records
+    rss: []                                                         # GitLab's patch-release feed is gitlab-ce's; here it would report every GitLab release
+    images: [gitlab/gitlab-runner, gitlab-org/gitlab-runner]        # tags like alpine-v19.5.3 -> v19.5.3
+
+  keycloak:
+    aliases: [rh-keycloak]
+    ghsa: [keycloak/keycloak]                                       # [v]
+    osv:
+      - { ecosystem: Maven, package: "org.keycloak:keycloak-services" }  # [v] 98 advisories
+      - { ecosystem: Maven, package: "org.keycloak:keycloak-core" }      # [v] 50 advisories
+    nvd: ["cpe:2.3:a:redhat:keycloak"]                              # [v] 99 CVEs
+    cvelist:                                                        # [v] 81 records
+      - { vendor: "Keycloak", product: "Keycloak" }                 # 15
+      - { vendor: "Red Hat", product: "keycloak" }                  # 22
+      - { vendor: "Red Hat, Inc.", product: "Keycloak" }            # 6
+      - { vendor: "n/a", product: "Keycloak" }                      # 36
+      - { vendor: "n/a", product: "keycloak-services" }             # 1
+      - { vendor: "n/a", product: "keycloak-model-infinispan" }     # 1
+    rss: []
+    images:
+      - quay.io/keycloak/keycloak
+      - quay.io/keycloak/keycloak-operator
+      - bitnami/keycloak
+      - bitnamilegacy/keycloak
+
+  openbao:
+    aliases: [bao]
+    ghsa: [openbao/openbao]                                         # [v]
+    osv:
+      - { ecosystem: Go, package: github.com/openbao/openbao }      # [v] 63 advisories
+    nvd: ["cpe:2.3:a:openbao:openbao"]                              # [v] 25 CVEs
+    cvelist: [{vendor: "openbao", product: "openbao"}]              # [v] 43 records
+    rss: []
+    images: [quay.io/openbao/openbao]
+
+  vault:
+    aliases: [hashicorp-vault]
+    ghsa: []                                                        # hashicorp/vault publishes no repo advisories (HCSEC bulletins instead)
+    osv:
+      - { ecosystem: Go, package: github.com/hashicorp/vault }      # [v] 110 advisories (vault/api client module: none)
+    nvd: ["cpe:2.3:a:hashicorp:vault"]                              # [v] 72 CVEs; matches Community and Enterprise editions
+    cvelist: [{vendor: "HashiCorp", product: "Vault"}]              # [v] 43 records
+    rss: []                                                         # discuss.hashicorp.com/c/security/52.rss covers all HashiCorp
+                                                                    # products; without a keyword filter it would flood vault with noise
+    images: [hashicorp/vault]
+
+  litellm:
+    aliases: [lite-llm]
+    ghsa: [BerriAI/litellm]                                         # [v]
+    osv:
+      - { ecosystem: PyPI, package: litellm }                       # [v] 82 advisories
+    nvd: ["cpe:2.3:a:litellm:litellm"]                              # [v] 37 CVEs
+    cvelist:                                                        # [v] 47 records
+      - { vendor: "BerriAI", product: "litellm" }                   # 31
+      - { vendor: "berriai", product: "berriai/litellm" }           # 15
+      - { vendor: "LiteLLM", product: "LiteLLM" }                   # 1
+    rss: []
+    images: [ghcr.io/berriai/litellm, ghcr.io/berriai/litellm-database]
+
+  prometheus:
+    aliases: []
+    ghsa: [prometheus/prometheus]                                   # [v]
+    osv:
+      - { ecosystem: Go, package: github.com/prometheus/prometheus }  # [v] 9 advisories
+    nvd: ["cpe:2.3:a:prometheus:prometheus"]                        # [v] 6 CVEs
+    cvelist:                                                        # [v] 7 records
+      - { vendor: "prometheus", product: "prometheus" }             # 6
+      - { vendor: "[UNKNOWN]", product: "prometheus" }              # 1
+    rss: []
+    images: [quay.io/prometheus/prometheus]
+
+  alertmanager:
+    aliases: [prometheus-alertmanager]
+    ghsa: [prometheus/alertmanager]                                 # [v]
+    osv:
+      - { ecosystem: Go, package: github.com/prometheus/alertmanager }  # [v] 2 advisories
+    nvd: ["cpe:2.3:a:prometheus:alertmanager"]                      # [v] 1 CVE
+    cvelist: [{vendor: "prometheus", product: "alertmanager"}]      # [v] 1 record
+    rss: []
+    images: [quay.io/prometheus/alertmanager]
+
+  grafana:
+    aliases: []
+    ghsa: [grafana/grafana]                                         # [v] (last repo advisory 2023; OSV/NVD carry current data)
+    osv:
+      - { ecosystem: Go, package: github.com/grafana/grafana }      # [v] 113 advisories
+    nvd: ["cpe:2.3:a:grafana:grafana"]                              # [v] 104 CVEs
+    cvelist:                                                        # [v] 116 records
+      - { vendor: "Grafana", product: "Grafana" }                   # 57
+      - { vendor: "Grafana", product: "Grafana OSS" }               # 54
+      - { vendor: "Grafana", product: "grafana/grafana" }           # 4
+      - { vendor: "Grafana", product: "Grafana Alerting" }          # 1
+    rss: []
+    images: [grafana/grafana]
+
+  grafana-alloy:
+    aliases: [alloy]
+    ghsa: []                                                        # grafana/alloy currently publishes no repo advisories
+    osv:
+      - { ecosystem: Go, package: github.com/grafana/alloy }        # [v] 2 advisories
+    nvd: ["cpe:2.3:a:grafana:alloy"]                                # [v] 1 CVE
+    cvelist: [{vendor: "Grafana", product: "Alloy"}]                # [v] 2 records
+    rss: []
+    images: [grafana/alloy]
+
+  mariadb:
+    aliases: [mariadb-galera, galera]
+    ghsa: [MariaDB/server]                                          # [v]
+    osv: []
+    nvd: ["cpe:2.3:a:mariadb:mariadb"]                              # [v] 416 CVEs
+    cvelist:                                                        # [v] 39 records
+      - { vendor: "MariaDB", product: "server" }                    # 27
+      - { vendor: "MariaDB", product: "MariaDB" }                   # 10
+      - { vendor: "MariaDB Foundation", product: "MariaDB Server" }  # 1
+      - { vendor: "n/a", product: "mariadb" }                       # 1
+    rss: []
+    images:
+      - mariadb
+      - bitnami/mariadb
+      - bitnami/mariadb-galera
+      - bitnamilegacy/mariadb
+      - bitnamilegacy/mariadb-galera
+    # Galera library itself is not covered yet; evaluate a CPE for it (v2).
+
+  drupal:
+    aliases: [drupal-core]
+    ghsa: []                                                        # Drupal is not hosted on GitHub
+    osv:
+      - { ecosystem: Packagist, package: drupal/core }              # [v] 198 advisories
+    nvd: ["cpe:2.3:a:drupal:drupal"]                                # [v] 734 CVEs
+    cvelist:                                                        # [v] 81 records
+      - { vendor: "Drupal", product: "Drupal Core" }                # 52
+      - { vendor: "Drupal", product: "Core" }                       # 19
+      - { vendor: "Drupal.org", product: "Drupal Core" }            # 8
+      - { vendor: "Drupal.org", product: "Drupal" }                 # 1
+      - { vendor: "drupal core", product: "drupal core" }           # 1
+    rss:
+      - https://www.drupal.org/security/rss.xml                     # [v] core advisories, latest item 2026-09-16
+    # Contrib modules: add https://www.drupal.org/security/contrib/rss.xml
+    # in a user override if you want them (noisy, mostly irrelevant).
+    images: [drupal]
+
+  netbird:
+    aliases: []
+    ghsa: [netbirdio/netbird]                                       # [v]
+    osv:
+      - { ecosystem: Go, package: github.com/netbirdio/netbird }    # [v] 6 advisories
+    nvd: []                                                         # no NetBird CPE in the NVD dictionary (2026-10-12)
+    cvelist:                                                        # [v] 2 records
+      - { vendor: "NetBird", product: "NetBird" }                   # 1
+      - { vendor: "NetBird VPN", product: "NetBird" }               # 1
+    rss: []
+    images: [netbirdio/netbird, netbirdio/management, netbirdio/signal, netbirdio/relay]
+
+  opensearch:
+    aliases: []
+    ghsa: [opensearch-project/OpenSearch]                           # [v]
+    osv:
+      - { ecosystem: Maven, package: "org.opensearch:opensearch" }  # [v] 1 advisory (sparse)
+    nvd:
+      - "cpe:2.3:a:amazon:opensearch"                               # [v] 11 CVEs
+      - "cpe:2.3:a:linuxfoundation:opensearch"                      # [v] 1 CVE (newer CVEs use the LF vendor)
+    cvelist:                                                        # [v] 7 records
+      - { vendor: "opensearch-project", product: "OpenSearch" }     # 1
+      - { vendor: "OpenSearch", product: "OpenSearch" }             # 2
+      - { vendor: "LF Projects", product: "OpenSearch" }            # 1
+      - { vendor: "Github", product: "OpenSearch" }                 # 3
+    rss: []
+    images: [opensearchproject/opensearch]
+    # OpenSearch Dashboards and security plugin are separate repos; add in v2 if needed.
+
+  # -------------------------------------------------------------------------
+  # Added 2026-10-27. Versions in stack.yaml must be APP versions, not Helm
+  # chart versions (e.g. the argo-cd chart 10.x ships Argo CD 3.x).
+  # -------------------------------------------------------------------------
+
+  # --- Kubernetes platform -------------------------------------------------
+
+  cilium:
+    aliases: []
+    ghsa: [cilium/cilium]                                           # [v] 44 advisories
+    osv:
+      - { ecosystem: Go, package: github.com/cilium/cilium }        # [v] 76 advisories
+    nvd: ["cpe:2.3:a:cilium:cilium"]                                # [v] 35 CVEs
+    cvelist: [{vendor: "cilium", product: "cilium"}]                # [v] 36 records
+    rss: []
+    images:
+      - quay.io/cilium/cilium
+      - quay.io/cilium/operator
+      - quay.io/cilium/operator-generic
+      - quay.io/cilium/hubble-relay
+      - quay.io/cilium/clustermesh-apiserver
+      - rancher/mirrored-cilium-cilium
+      - rancher/mirrored-cilium-operator-generic
+      - rancher/mirrored-cilium-hubble-relay
+
+  envoy:
+    aliases: [cilium-envoy, envoyproxy]                             # cilium-envoy tracks Envoy's version
+    ghsa: [envoyproxy/envoy]                                        # [v] 100+ advisories
+    osv:
+      - { ecosystem: Go, package: github.com/envoyproxy/envoy }     # [v] 11 advisories (Envoy version ranges)
+    nvd: ["cpe:2.3:a:envoyproxy:envoy"]                             # [v] 126 CVEs
+    cvelist: [{vendor: "envoyproxy", product: "envoy"}]             # [v] 98 records
+    rss: []
+    images: [quay.io/cilium/cilium-envoy, rancher/mirrored-cilium-cilium-envoy, envoyproxy/envoy]
+
+  cert-manager:
+    aliases: [certmanager]
+    ghsa: [cert-manager/cert-manager]                               # [v] 3 advisories
+    osv:
+      - { ecosystem: Go, package: github.com/cert-manager/cert-manager }  # [v] 4 advisories
+    nvd: ["cpe:2.3:a:linuxfoundation:cert-manager"]                 # [v] 1 CVE
+    cvelist: [{vendor: "cert-manager", product: "cert-manager"}]    # [v] 2 records
+    rss: []
+    images:
+      - quay.io/jetstack/cert-manager-controller
+      - quay.io/jetstack/cert-manager-webhook
+      - quay.io/jetstack/cert-manager-cainjector
+      - quay.io/jetstack/cert-manager-startupapicheck
+      - quay.io/jetstack/cert-manager-acmesolver
+
+  external-secrets:
+    aliases: [eso, external-secrets-operator]
+    ghsa: [external-secrets/external-secrets]                       # [v] 9 advisories
+    osv:
+      - { ecosystem: Go, package: github.com/external-secrets/external-secrets }  # [v] 12 advisories
+    nvd: ["cpe:2.3:a:external-secrets:external_secrets_operator"]   # [v] 4 CVEs
+    cvelist:                                                        # [v] 8 records
+      - { vendor: "external-secrets", product: "external-secrets" }  # 8
+    rss: []
+    images: [ghcr.io/external-secrets/external-secrets]
+
+  hcloud-ccm:
+    aliases: [hcloud-cloud-controller-manager]
+    ghsa: [hetznercloud/hcloud-cloud-controller-manager]            # [r]
+    osv: []                                                         # no OSV advisories
+    nvd: []                                                         # no CPE in NVD (2026-10-27)
+    rss: []
+    images: [hetznercloud/hcloud-cloud-controller-manager]
+
+  hcloud-csi:
+    aliases: [hcloud-csi-driver]
+    ghsa: [hetznercloud/csi-driver]                                 # [r]
+    osv: []                                                         # no OSV advisories
+    nvd: []                                                         # no CPE in NVD (2026-10-27)
+    rss: []
+    images: [hetznercloud/hcloud-csi-driver]
+
+  actions-runner-controller:
+    aliases: [arc, gha-runner-scale-set]
+    ghsa: [actions/actions-runner-controller]                       # [r]
+    osv: []                                                         # no OSV advisories
+    nvd: []                                                         # no CPE in NVD (2026-10-27)
+    rss: []
+    images: [ghcr.io/actions/gha-runner-scale-set-controller]
+
+  argocd-image-updater:
+    aliases: [image-updater]
+    ghsa: [argoproj-labs/argocd-image-updater]                      # [r]
+    osv: []                                                         # no OSV advisories
+    nvd: []                                                         # no CPE in NVD (2026-10-27)
+    rss: []
+    images: [quay.io/argoprojlabs/argocd-image-updater]
+
+  gpu-operator:
+    aliases: [nvidia-gpu-operator]
+    ghsa: [NVIDIA/gpu-operator]                                     # [v] 2 advisories
+    osv:
+      - { ecosystem: Go, package: github.com/NVIDIA/gpu-operator }  # [v] 4 advisories
+    nvd: ["cpe:2.3:a:nvidia:nvidia_gpu_operator"]                   # [v] 7 CVEs
+    cvelist:                                                        # [v] 8 records
+      - { vendor: "NVIDIA", product: "GPU Operator" }               # 4
+      - { vendor: "NVIDIA", product: "NVIDIA GPU Operator" }        # 4
+    rss: []
+    images: [nvcr.io/nvidia/gpu-operator]
+
+  nvidia-container-toolkit:
+    aliases: [container-toolkit]                                    # deployed by gpu-operator; most NVIDIA container CVEs land here
+    ghsa: [NVIDIA/nvidia-container-toolkit]                         # [v] 2 advisories
+    osv:
+      - { ecosystem: Go, package: github.com/NVIDIA/nvidia-container-toolkit }  # [v] 8 advisories
+    nvd: ["cpe:2.3:a:nvidia:nvidia_container_toolkit"]              # [v] 7 CVEs
+    cvelist:                                                        # [v] 10 records
+      - { vendor: "NVIDIA", product: "Container Toolkit" }          # 6
+      - { vendor: "NVIDIA", product: "NVIDIA Container Toolkit" }   # 4
+    rss: []
+    images: [nvcr.io/nvidia/k8s/container-toolkit]
+
+  # --- Data -----------------------------------------------------------------
+
+  cloudnative-pg:
+    aliases: [cnpg, cnpg-operator]
+    ghsa: [cloudnative-pg/cloudnative-pg]                           # [v] 4 advisories
+    osv:
+      - { ecosystem: Go, package: github.com/cloudnative-pg/cloudnative-pg }  # [v] 2 advisories
+    nvd: []                                                         # no CPE in NVD (2026-10-27)
+    cvelist:                                                        # [v] 3 records
+      - { vendor: "cloudnative-pg", product: "cloudnative-pg" }     # 3
+    rss: []
+    images: [ghcr.io/cloudnative-pg/cloudnative-pg]
+
+  cnpg-barman-cloud:
+    aliases: [plugin-barman-cloud, barman-cloud]
+    ghsa: [cloudnative-pg/plugin-barman-cloud]                      # [r]
+    osv: []                                                         # no OSV advisories
+    nvd: []                                                         # no CPE in NVD (2026-10-27)
+    rss: []
+    images: [ghcr.io/cloudnative-pg/plugin-barman-cloud, ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar]
+
+  postgresql:
+    aliases: [postgres]                                             # use the server version, e.g. 17.4 for image 17.4-7-bullseye
+    ghsa: []                                                        # postgres/postgres is a mirror without advisories
+    osv: []
+    nvd: ["cpe:2.3:a:postgresql:postgresql"]                        # [v] 209 CVEs
+    cvelist:                                                        # [v] 107 records
+      - { vendor: "n/a", product: "PostgreSQL" }                    # 79
+      - { vendor: "PostgreSQL", product: "PostgreSQL" }             # 8
+      - { vendor: "PostgreSQL Global Development Group", product: "PostgreSQL" }  # 9
+      - { vendor: "The PostgreSQL Global Development Group", product: "PostgreSQL" }  # 6
+      - { vendor: "PostgreSQL Project", product: "postgresql" }     # 2
+      - { vendor: "Red Hat, Inc.", product: "postgresql" }          # 3
+    rss: []
+    images: [ghcr.io/cloudnative-pg/postgresql, postgres, bitnami/postgresql, bitnamilegacy/postgresql]
+
+  dragonfly:
+    aliases: [dragonflydb]                                          # the database itself
+    ghsa: [dragonflydb/dragonfly]                                   # [v] 7 advisories
+    osv: []
+    nvd: ["cpe:2.3:a:dragonflydb:dragonfly"]                        # [v] 2 CVEs (linuxfoundation:dragonfly is the unrelated CNCF P2P project)
+    cvelist: [{vendor: "DragonflyDB", product: "Dragonfly"}]        # [v] 8 records
+    rss: []
+    images: [ghcr.io/dragonflydb/dragonfly]
+
+  dragonfly-operator:
+    aliases: [dragonflydb-operator]
+    ghsa: [dragonflydb/dragonfly-operator]                          # [r]
+    osv: []                                                         # no OSV advisories
+    nvd: []                                                         # no CPE in NVD (2026-10-27)
+    rss: []
+    images: [ghcr.io/dragonflydb/operator]
+
+  minio:
+    aliases: []                                                     # versions like RELEASE.2025-04-22T22-12-26Z are supported
+    ghsa: [minio/minio]                                             # [v] 27 advisories, ranges in RELEASE.* form
+    osv: []                                                         # 28 advisories, but only Go pseudo-versions (ignored); GHSA covers them
+    nvd: ["cpe:2.3:a:minio:minio"]                                  # [v] 23 CVEs
+    cvelist:                                                        # [v] 29 records
+      - { vendor: "MinIO", product: "MinIO" }                       # 28
+      - { vendor: "n/a", product: "MinIO" }                         # 1
+    rss: []
+    images: [quay.io/minio/minio]
+
+  minio-mc:
+    aliases: [mc, minio-client]
+    ghsa: [minio/mc]                                                # [r]
+    osv: []                                                         # no OSV advisories
+    nvd: []                                                         # no CPE in NVD (2026-10-27)
+    rss: []
+    images: [quay.io/minio/mc]
+
+  harbor:
+    aliases: [goharbor]
+    ghsa: [goharbor/harbor]                                         # [v] 41 advisories
+    osv:
+      - { ecosystem: Go, package: github.com/goharbor/harbor }      # [v] 41 advisories
+    nvd: ["cpe:2.3:a:linuxfoundation:harbor"]                       # [v] 24 CVEs (goharbor:harbor matches none)
+    cvelist:                                                        # [v] 15 records
+      - { vendor: "goharbor", product: "harbor" }                   # 2
+      - { vendor: "Harbor", product: "Harbor" }                     # 5
+      - { vendor: "n/a", product: "Harbor" }                        # 7
+      - { vendor: "Harbor", product: "Project" }                    # 1
+    rss: []
+    images:
+      - goharbor/harbor-core
+      - goharbor/harbor-portal
+      - goharbor/harbor-jobservice
+      - goharbor/harbor-registryctl
+      - goharbor/registry-photon
+      - goharbor/harbor-exporter
+      - goharbor/harbor-db
+      - goharbor/redis-photon
+      - goharbor/nginx-photon
+      - goharbor/trivy-adapter-photon
+
+  # --- Observability ----------------------------------------------------------
+  # kube-prometheus-stack bundles prometheus, alertmanager, grafana,
+  # prometheus-operator, node-exporter and kube-state-metrics: list each one.
+
+  loki:
+    aliases: []
+    ghsa: [grafana/loki]                                            # [r]
+    osv:
+      - { ecosystem: Go, package: github.com/grafana/loki/v3 }      # [v] 2 advisories
+      - { ecosystem: Go, package: github.com/grafana/loki }         # [v] 2 advisories (older module path)
+    nvd: ["cpe:2.3:a:grafana:loki"]                                 # [v] 2 CVEs
+    cvelist: [{vendor: "Grafana", product: "Loki"}]                 # [v] 2 records
+    rss: []
+    images: [grafana/loki]
+
+  promtail:
+    aliases: []
+    # Promtail lives in the Loki repo and has no selectors of its own, so it
+    # reports Loki's advisories. It is end of life (2026-03-02); Grafana
+    # recommends migrating to Alloy.
+    ghsa: [grafana/loki]                                            # [r]
+    osv:
+      - { ecosystem: Go, package: github.com/grafana/loki/v3 }      # [v] 2 advisories
+    nvd: []                                                         # no promtail CPE in NVD (2026-10-27)
+    cvelist: [{vendor: "Grafana", product: "Loki"}]                 # [v] 2 records (Loki's, like the selectors above)
+    rss: []
+    images: [grafana/promtail]
+
+  prometheus-operator:
+    aliases: []
+    ghsa: [prometheus-operator/prometheus-operator]                 # [r]
+    osv: []                                                         # no OSV advisories
+    nvd: []                                                         # no CPE in NVD (2026-10-27)
+    rss: []
+    images:                                                         # not prometheus-config-reloader: other charts run it as a sidecar
+      - quay.io/prometheus-operator/prometheus-operator
+      - quay.io/prometheus-operator/admission-webhook
+
+  node-exporter:
+    aliases: [node_exporter, prometheus-node-exporter]
+    ghsa: [prometheus/node_exporter]                                # [r]
+    osv: []                                                         # no OSV advisories
+    nvd: []                                                         # no CPE in NVD (2026-10-27)
+    rss: []
+    images: [quay.io/prometheus/node-exporter]
+
+  kube-state-metrics:
+    aliases: [ksm]
+    ghsa: [kubernetes/kube-state-metrics]                           # [r]
+    osv:
+      - { ecosystem: Go, package: k8s.io/kube-state-metrics }       # [v] 2 advisories (2022)
+    nvd: ["cpe:2.3:a:kubernetes:kube-state-metrics"]                # [v] 1 CVE
+    cvelist: [{vendor: "Red Hat", product: "kube-state-metrics"}]   # [v] 1 record
+    rss: []
+    images: [registry.k8s.io/kube-state-metrics/kube-state-metrics]
+
+  pushgateway:
+    aliases: [prometheus-pushgateway]
+    ghsa: [prometheus/pushgateway]                                  # [r]
+    osv: []                                                         # no OSV advisories
+    nvd: []                                                         # no CPE in NVD (2026-10-27)
+    rss: []
+    images: [quay.io/prometheus/pushgateway]
+
+  victoria-metrics:
+    aliases: [victoriametrics]
+    ghsa: [VictoriaMetrics/VictoriaMetrics]                         # [v] 3 advisories
+    osv:
+      - { ecosystem: Go, package: github.com/VictoriaMetrics/VictoriaMetrics }  # [v] 4 advisories
+    nvd: []                                                         # no CPE in NVD (2026-10-27)
+    cvelist:                                                        # [v] 3 records
+      - { vendor: "VictoriaMetrics", product: "VictoriaMetrics" }   # 2
+      - { vendor: "n/a", product: "VictoriaMetrics" }               # 1
+    rss: []
+    images:
+      - victoriametrics/victoria-metrics
+      - victoriametrics/vmagent
+      - victoriametrics/vmalert
+      - victoriametrics/vmauth
+      - victoriametrics/vminsert
+      - victoriametrics/vmselect
+      - victoriametrics/vmstorage
+
+  victoria-metrics-operator:
+    aliases: [vm-operator]
+    ghsa: [VictoriaMetrics/operator]                                # [v] 1 advisory
+    osv: []                                                         # no OSV advisories
+    nvd: []                                                         # no CPE in NVD (2026-10-27)
+    rss: []
+    images: [victoriametrics/operator]
+
+  gatus:
+    aliases: []
+    ghsa: [TwiN/gatus]                                              # [r]
+    osv: []                                                         # no OSV advisories (module github.com/TwiN/gatus/v5)
+    nvd: []                                                         # no CPE in NVD (2026-10-27)
+    rss: []
+    images: [twinproduction/gatus]
+
+  # --- Tooling ----------------------------------------------------------------
+
+  renovate:
+    aliases: [renovatebot]
+    ghsa: [renovatebot/renovate]                                    # [v] 25 advisories
+    osv:
+      - { ecosystem: npm, package: renovate }                       # [v] 11 advisories
+    nvd: []                                                         # no CPE in NVD (2026-10-27)
+    cvelist: [{vendor: "renovatebot", product: "renovate"}]         # [v] 25 records
+    rss: []
+    images: [renovate/renovate, ghcr.io/renovatebot/renovate]
+
+  cloudflared:
+    aliases: [cloudflare-tunnel]
+    ghsa: [cloudflare/cloudflared]                                  # [v] 2 advisories
+    osv:
+      - { ecosystem: Go, package: github.com/cloudflare/cloudflared }  # [v] 4 advisories
+    nvd: ["cpe:2.3:a:cloudflare:cloudflared"]                       # [v] 2 CVEs
+    cvelist: [{vendor: "Cloudflare", product: "cloudflared"}]       # [v] 2 records
+    rss: []
+    images: [cloudflare/cloudflared]
+
+  go:
+    aliases: [golang]                                               # the Go toolchain/stdlib your own services are built with
+    ghsa: []                                                        # Go publishes through its own vuln DB (OSV)
+    osv:
+      - { ecosystem: Go, package: stdlib }                          # [v] 181 advisories (standard library)
+      - { ecosystem: Go, package: toolchain }                       # [v] 34 advisories (go command)
+    nvd: ["cpe:2.3:a:golang:go"]                                    # [v] 174 CVEs
+    cvelist:                                                        # [v] 173 records; every product the Go CNA has named (2026-11-12)
+      - { vendor: "Go standard library", product: "net/http" }      # 27
+      - { vendor: "Go standard library", product: "crypto/x509" }   # 15
+      - { vendor: "Go standard library", product: "html/template" }  # 14
+      - { vendor: "Go standard library", product: "crypto/tls" }    # 13
+      - { vendor: "Go standard library", product: "net/http/internal/http2" }  # 6
+      - { vendor: "Go standard library", product: "net/textproto" }  # 6
+      - { vendor: "Go standard library", product: "os" }            # 6
+      - { vendor: "Go standard library", product: "path/filepath" }  # 6
+      - { vendor: "Go standard library", product: "net/url" }       # 5
+      - { vendor: "Go standard library", product: "net" }           # 4
+      - { vendor: "Go standard library", product: "net/mail" }      # 4
+      - { vendor: "Go standard library", product: "archive/tar" }   # 3
+      - { vendor: "Go standard library", product: "encoding/xml" }  # 3
+      - { vendor: "Go standard library", product: "mime/multipart" }  # 3
+      - { vendor: "Go standard library", product: "net/http/httputil" }  # 3
+      - { vendor: "Go standard library", product: "os/exec" }       # 3
+      - { vendor: "Go standard library", product: "archive/zip" }   # 2
+      - { vendor: "Go standard library", product: "crypto/internal/nistec" }  # 2
+      - { vendor: "Go standard library", product: "encoding/asn1" }  # 2
+      - { vendor: "Go standard library", product: "encoding/gob" }  # 2
+      - { vendor: "Go standard library", product: "go/parser" }     # 2
+      - { vendor: "Go standard library", product: "net/http/internal" }  # 2
+      - { vendor: "Go standard library", product: "syscall" }       # 2
+      - { vendor: "Go standard library", product: "compress/gzip" }  # 1
+      - { vendor: "Go standard library", product: "crypto/rand" }   # 1
+      - { vendor: "Go standard library", product: "database/sql" }  # 1
+      - { vendor: "Go standard library", product: "encoding/pem" }  # 1
+      - { vendor: "Go standard library", product: "go/build/constraint" }  # 1
+      - { vendor: "Go standard library", product: "go/scanner" }    # 1
+      - { vendor: "Go standard library", product: "internal/safefilepath" }  # 1
+      - { vendor: "Go standard library", product: "internal/syscall/unix" }  # 1
+      - { vendor: "Go standard library", product: "internal/syscall/windows" }  # 1
+      - { vendor: "Go standard library", product: "io/fs" }         # 1
+      - { vendor: "Go standard library", product: "math/big" }      # 1
+      - { vendor: "Go standard library", product: "mime" }          # 1
+      - { vendor: "Go standard library", product: "net/http/cookiejar" }  # 1
+      - { vendor: "Go standard library", product: "net/netip" }     # 1
+      - { vendor: "Go standard library", product: "regexp/syntax" }  # 1
+      - { vendor: "Go standard library", product: "runtime" }       # 1
+      - { vendor: "Go toolchain", product: "cmd/go" }               # 32
+      - { vendor: "Go toolchain", product: "cmd/compile" }          # 5
+      - { vendor: "Go toolchain", product: "cmd/cgo" }              # 4
+      - { vendor: "Go toolchain", product: "cmd/link" }             # 3
+    rss: []
+
+  java:
+    aliases: [openjdk, jdk, jre]                                    # the Java runtime inside images (Keycloak, ...): OpenJDK fixes ship in Oracle's Critical Patch Updates
+    ghsa: []                                                        # the JDK publishes no GitHub advisories
+    osv: []                                                         # not a package in any OSV ecosystem
+    nvd:                                                            # [v] exact versions per line (21.0.11 = that release and older)
+      - "cpe:2.3:a:oracle:jdk"                                      # [v] 809 CVEs
+      - "cpe:2.3:a:oracle:jre"                                      # [v] 817 CVEs
+      - "cpe:2.3:a:oracle:openjdk"                                  # [v] 98 CVEs
+    cvelist:
+      - { vendor: "Oracle Corporation", product: "Oracle Java SE" }  # Oracle as CNA, e.g. CVE-2026-114938 (Java4Shell)
+    rss: []
+
+  # --- Kubernetes add-ons and the software inside common charts (2026-11-06).
+  # RKE2 ships them as rancher/hardened-* and rancher/mirrored-* images.
+  etcd:
+    aliases: []                                                     # the cluster database (RKE2/k3s run it on the masters)
+    ghsa: [etcd-io/etcd]                                            # [v] 20 advisories
+    osv:
+      - { ecosystem: Go, package: go.etcd.io/etcd/v3 }              # [v] 18 advisories
+      - { ecosystem: Go, package: go.etcd.io/etcd }                 # [v] 16 advisories (before the /v3 module)
+      - { ecosystem: Go, package: go.etcd.io/etcd/server/v3 }       # [v] 2 advisories
+    nvd: ["cpe:2.3:a:etcd:etcd"]                                    # [v] 11 CVEs (linuxfoundation:etcd matches none)
+    cvelist:                                                        # [v] 16 records
+      - { vendor: "etcd-io", product: "etcd" }                      # 13
+      - { vendor: "Red Hat, Inc.", product: "etcd" }                # 2
+      - { vendor: "The etcd Project", product: "etcd:" }            # 1
+    rss: []
+    images: [etcd-development/etcd, coreos/etcd, registry.k8s.io/etcd, rancher/hardened-etcd]
+
+  coredns:
+    aliases: []
+    ghsa: [coredns/coredns]                                         # [v] 16 advisories
+    osv:
+      - { ecosystem: Go, package: github.com/coredns/coredns }      # [v] 36 advisories
+    nvd: ["cpe:2.3:a:coredns.io:coredns"]                           # [v] 16 CVEs (coredns:coredns matches none)
+    cvelist:                                                        # [v] 17 records
+      - { vendor: "coredns", product: "coredns" }                   # 15
+      - { vendor: "n/a", product: "coreDNS" }                       # 2
+    rss: []
+    images: [coredns/coredns, rancher/hardened-coredns, rancher/mirrored-coredns-coredns]
+
+  ingress-nginx:
+    aliases: [ingress-nginx-controller]                             # the Kubernetes project's controller (not NGINX Inc's nginx-ingress)
+    ghsa: []                                                        # kubernetes/ingress-nginx has no repository advisories
+    osv:
+      - { ecosystem: Go, package: k8s.io/ingress-nginx }            # [v] 28 advisories
+    nvd: ["cpe:2.3:a:kubernetes:ingress-nginx"]                     # [v] 9 CVEs
+    cvelist:                                                        # [v] 22 records
+      - { vendor: "Kubernetes", product: "ingress-nginx" }          # 18
+      - { vendor: "Kubernetes", product: "Kubernetes ingress-nginx" }  # 4
+    rss: []
+    images: [ingress-nginx/controller, rancher/nginx-ingress-controller]
+
+  traefik:
+    aliases: []
+    ghsa: [traefik/traefik]                                         # [v] 90 advisories
+    osv:
+      - { ecosystem: Go, package: github.com/traefik/traefik/v3 }   # [v] 120 advisories
+      - { ecosystem: Go, package: github.com/traefik/traefik/v2 }   # [v] 122 advisories
+    nvd: ["cpe:2.3:a:traefik:traefik"]                              # [v] 84 CVEs
+    cvelist:                                                        # [v] 81 records
+      - { vendor: "Traefik", product: "Traefik" }                   # 80
+      - { vendor: "containous", product: "traefik" }                # 1
+    rss: []
+    images: [traefik, rancher/hardened-traefik, rancher/mirrored-library-traefik]
+
+  calico:
+    aliases: [project-calico]
+    ghsa: []                                                        # projectcalico/calico has no repository advisories
+    osv:
+      - { ecosystem: Go, package: github.com/projectcalico/calico } # [v] 9 advisories
+    nvd: ["cpe:2.3:a:tigera:calico", "cpe:2.3:a:projectcalico:calico"]  # [v] 6 and 1 CVEs
+    cvelist:                                                        # [v] 10 records
+      - { vendor: "Tigera", product: "Calico" }                     # 7
+      - { vendor: "Tigera Inc", product: "Calico" }                 # 1
+      - { vendor: "Project Calico", product: "Calico" }             # 1
+      - { vendor: "Tigera", product: "Typha" }                      # 1
+      - { vendor: "Calico", product: "Typha" }                      # 1
+    rss: []
+    images: [calico/node, calico/cni, calico/kube-controllers, calico/typha, calico/apiserver, rancher/hardened-calico]
+
+  flannel:
+    aliases: []
+    ghsa: [flannel-io/flannel]                                      # [v] 1 advisory
+    osv:
+      - { ecosystem: Go, package: github.com/flannel-io/flannel }   # [v] 2 advisories
+    nvd: ["cpe:2.3:a:flannel-io:flannel"]                           # [v] 1 CVE
+    cvelist: [{vendor: "flannel-io", product: "flannel"}]           # [v] 1 record
+    rss: []
+    images: [flannel/flannel, flannel-io/flannel, rancher/hardened-flannel, rancher/mirrored-flannelcni-flannel]
+
+  external-snapshotter:
+    aliases: [snapshot-controller]                                  # the CSI snapshot controller
+    ghsa: []                                                        # kubernetes-csi/external-snapshotter has no repository advisories
+    osv:
+      - { ecosystem: Go, package: github.com/kubernetes-csi/external-snapshotter/v6 }  # [v] 1 advisory (none for /v8 yet)
+    nvd: ["cpe:2.3:a:kubernetes:external-snapshotter", "cpe:2.3:a:kubernetes:container_storage_interface_snapshotter"]  # [v] 1 and 1 CVEs
+    cvelist:                                                        # [v] 2 records
+      - { vendor: "Kubernetes", product: "kubernetes-csi external-snapshotter" }  # 1
+      - { vendor: "Kubernetes", product: "CSI Snapshotter" }        # 1
+    rss: []
+    images: [sig-storage/snapshot-controller, rancher/hardened-snapshot-controller]
+
+  dex:
+    aliases: [dexidp]                                               # OIDC; Argo CD's login (argocd-dex-server)
+    ghsa: [dexidp/dex]                                              # [v] 4 advisories
+    osv:
+      - { ecosystem: Go, package: github.com/dexidp/dex }           # [v] 7 advisories
+    nvd: ["cpe:2.3:a:linuxfoundation:dex"]                          # [v] 4 CVEs
+    cvelist:                                                        # [v] 4 records
+      - { vendor: "dexidp", product: "dex" }                        # 3
+      - { vendor: "n/a", product: "dexidp/dex" }                    # 1
+    rss: []
+    images: [dexidp/dex]
+
+  redis:
+    aliases: []
+    ghsa: [redis/redis]                                             # [v] 47 advisories
+    osv: []                                                         # C code: no OSV package
+    nvd: ["cpe:2.3:a:redis:redis"]                                  # [v] 46 CVEs
+    cvelist:                                                        # [v] 55 records
+      - { vendor: "Redis", product: "Redis" }                       # 49
+      - { vendor: "Redis Labs", product: "Redis" }                  # 4
+      - { vendor: "n/a", product: "Redis" }                         # 2
+    rss: []
+    images: [redis, bitnami/redis]                                  # redis matches library/redis on any registry (ecr-public docker/library/redis)
+
+  nginx:
+    aliases: []                                                     # the web server (gateways, frontends), not an ingress controller
+    ghsa: []
+    osv: []                                                         # C code: no OSV package
+    nvd: ["cpe:2.3:a:f5:nginx", "cpe:2.3:a:nginx:nginx"]            # [v] 41 and 2 CVEs (F5 took over the CPE)
+    cvelist:                                                        # [v] 42 records
+      - { vendor: "F5", product: "NGINX Open Source" }              # 35
+      - { vendor: "F5", product: "NGINX" }                          # 2
+      - { vendor: "nginx", product: "nginx" }                       # 2
+      - { vendor: "[UNKNOWN]", product: "nginx" }                   # 3
+    rss: []
+    images: [nginx, nginxinc/nginx-unprivileged, bitnami/nginx]
+
+  pgbouncer:
+    aliases: []
+    ghsa: []                                                        # pgbouncer/pgbouncer has no repository advisories
+    osv: []
+    nvd: ["cpe:2.3:a:pgbouncer:pgbouncer"]                          # [v] 10 CVEs
+    cvelist: [{vendor: "n/a", product: "PgBouncer"}]                # [v] 13 records
+    rss: []
+    images: [cloudnative-pg/pgbouncer, bitnami/pgbouncer, edoburu/pgbouncer]
+
+  haproxy:
+    aliases: []                                                     # the load balancer, usually on VMs: list it in stack.yaml (discover only sees images)
+    ghsa: []                                                        # haproxy/haproxy is a mirror of git.haproxy.org without repository advisories
+    osv: []                                                         # C code: no OSV package
+    nvd: ["cpe:2.3:a:haproxy:haproxy"]                              # [v] 36 CVEs (haproxy_enterprise and aloha are other products)
+    cvelist:                                                        # [v] 16 records
+      - { vendor: "HAProxy", product: "HAProxy" }                   # 9
+      - { vendor: "HAProxy Technologies", product: "HAProxy" }      # 1
+      - { vendor: "HAProxy Technologies", product: "HAProxy Community Edition" }  # 1
+      - { vendor: "HAProxy Project", product: "HAProxy 2.6" }       # 1
+      - { vendor: "HAProxy Project", product: "HAProxy 2.8" }       # 1
+      - { vendor: "HAProxy Project", product: "HAProxy 2.9" }       # 1
+      - { vendor: "HAProxy Project", product: "HAProxy 3.0" }       # 1
+      - { vendor: "n/a", product: "HAProxy" }                       # 3
+      - { vendor: "[UNKNOWN]", product: "haproxy" }                 # 1
+    rss: []
+    images: [haproxy, haproxytech/haproxy-alpine, haproxytech/haproxy-debian, haproxytech/haproxy-ubuntu]
+
+  sentry:
+    aliases: []                                                     # self-hosted Sentry (getsentry/self-hosted), calendar versions like 23.9.1
+    ghsa: [getsentry/sentry]                                        # [v] 22 advisories (getsentry/self-hosted: 0)
+    osv:
+      - { ecosystem: PyPI, package: sentry }                        # [v] 30 advisories; PyPI stopped at 23.7.1, the ranges cover later releases
+    nvd: ["cpe:2.3:a:sentry:sentry"]                                # [v] 16 CVEs (sentry_software_development_kit is the SDKs)
+    cvelist:                                                        # [v] checked 2026-11-18 on 21 cveawg.mitre.org records
+      - { vendor: "getsentry", product: "sentry" }                  # 20
+      - { vendor: "Sentry", product: "Sentry" }                     # 1
+    rss: []
+    images: [getsentry/sentry, ghcr.io/getsentry/sentry]
+
+  trivy:
+    aliases: []                                                     # the scanner (trivy-operator's trivy-server and scan jobs)
+    ghsa: [aquasecurity/trivy]                                      # [v] 5 advisories
+    osv:
+      - { ecosystem: Go, package: github.com/aquasecurity/trivy }   # [v] 10 advisories
+    nvd: ["cpe:2.3:a:aquasec:trivy"]                                # [v] 3 CVEs
+    cvelist:                                                        # [v] 6 records
+      - { vendor: "aquasecurity", product: "trivy" }                # 5
+      - { vendor: "aquasec", product: "Trivy" }                     # 1
+    rss: []
+    images: [aquasec/trivy, aquasecurity/trivy]
+
+# ---------------------------------------------------------------------------
+# Helm charts: which catalog products a chart deploys and where each
+# version is read from. Used by the `helm:` list in stack.yaml.
+#   appVersion                      Chart.yaml appVersion
+#   chartVersion                    the chart version (charts that tag images with it)
+#   {values: a.b.tag}               an image tag in the chart's values.yaml
+#   {subchart: name}                appVersion of a bundled dependency
+#   {subchart: name, values: a.b}   an image tag in a bundled dependency
+# Image tags are cut to their leading version ("v3.9.1-distroless" -> v3.9.1).
+# Keys are chart names (the same name in another repo maps the same way).
+# ---------------------------------------------------------------------------
+helm_charts:
+  alloy:                            { grafana-alloy: appVersion }
+  argo-cd:
+    argocd: appVersion
+    dex:    { values: dex.image.tag }
+    redis:  { values: redis.image.tag }
+  trivy-operator:                   { trivy: { values: trivy.image.tag } }  # trivy-operator itself has no advisory source
+  cert-manager:                     { cert-manager: appVersion }
+  cloudnative-pg:                   { cloudnative-pg: appVersion }
+  plugin-barman-cloud:              { cnpg-barman-cloud: appVersion }
+  dragonfly-operator:               { dragonfly-operator: appVersion }
+  external-secrets:                 { external-secrets: appVersion }
+  gatus:                            { gatus: appVersion }
+  hcloud-cloud-controller-manager:  { hcloud-ccm: chartVersion }  # image tag is v{{ .Chart.Version }}
+  hcloud-csi:                       { hcloud-csi: chartVersion }  # image tag is v{{ .Chart.Version }}
+  loki:                             { loki: appVersion }
+  promtail:                         { promtail: appVersion }
+  prometheus-pushgateway:           { pushgateway: appVersion }
+  vault:                            { vault: { values: server.image.tag } }
+  openbao:                          { openbao: appVersion }
+  harbor:                           { harbor: appVersion }
+  longhorn:                         { longhorn: appVersion }
+  litellm-helm:                     { litellm: appVersion }
+  keycloak:                         { keycloak: appVersion }
+  gha-runner-scale-set-controller:  { actions-runner-controller: appVersion }
+  gha-runner-scale-set:             { actions-runner-controller: appVersion }
+  minio:
+    minio:    { values: image.tag }
+    minio-mc: { values: mcImage.tag }
+  gpu-operator:
+    gpu-operator:             appVersion
+    nvidia-container-toolkit: { values: toolkit.version }
+  kube-prometheus-stack:
+    prometheus-operator: appVersion
+    prometheus:          { values: prometheus.prometheusSpec.image.tag }
+    alertmanager:        { values: alertmanager.alertmanagerSpec.image.tag }
+    grafana:             { subchart: grafana }
+    kube-state-metrics:  { subchart: kube-state-metrics }
+    node-exporter:       { subchart: prometheus-node-exporter }
+  victoria-metrics-k8s-stack:
+    victoria-metrics:          appVersion
+    victoria-metrics-operator: { subchart: victoria-metrics-operator }
+    grafana:                   { subchart: grafana }
+    kube-state-metrics:        { subchart: kube-state-metrics }
+    node-exporter:             { subchart: prometheus-node-exporter }
+  # RKE2's bundled charts (https://github.com/rancher/rke2-charts), installed
+  # as Helm releases in kube-system. Their appVersion lags the image RKE2
+  # ships, so versions come from the image tags.
+  rke2-cilium:
+    cilium: { values: image.tag }
+    envoy:  { values: envoy.image.tag }
+  rke2-coredns:             { coredns: { values: image.tag } }
+  rke2-ingress-nginx:       { ingress-nginx: { values: controller.image.tag } }
+  rke2-traefik:             { traefik: { values: image.tag } }
+  rke2-canal:
+    calico:  { values: calico.nodeImage.tag }
+    flannel: { values: flannel.image.tag }
+  rke2-flannel:             { flannel: { values: flannel.image.tag } }
+  rke2-snapshot-controller: { external-snapshotter: { values: controller.image.tag } }
+  # Nothing to watch: CRDs and config objects, or software without any
+  # advisory source (metrics-server, multus: see ignore_images).
+  rke2-metrics-server:          {}
+  rke2-multus:                  {}
+  rke2-runtimeclasses:          {}
+  rke2-snapshot-controller-crd: {}
+  rke2-calico-crd:              {}
+  rke2-canal-crd:               {}
+  rke2-multus-crd:              {}
+  rke2-traefik-crd:             {}
+  rke2-gateway-api-crd:         {}
+
+# ---------------------------------------------------------------------------
+# Images not worth a catalog entry, by group: stack discover leaves them out
+# of its "not in the catalog" notes and Trivy out of its unmatched images.
+# Patterns match like catalog images (any registry, mirrors); "*" matches
+# within one path segment, a final "**" everything below. Add your own
+# images in a sources override (a new group); drop a group with [].
+# Trivy still scans these images; vulnwatch just can't match advisories to
+# them.
+# ---------------------------------------------------------------------------
+ignore_images:
+  # Small helpers of a watched product; their advisories (rare) land on it.
+  prometheus-helpers: [prometheus-operator/prometheus-config-reloader]
+  cilium-helpers:
+    - cilium/hubble-ui*
+    - cilium/certgen
+    - rancher/mirrored-cilium-hubble-ui*
+    - rancher/mirrored-cilium-certgen
+    - rancher/hardened-cni-plugins                                  # CNI plugins in the cilium DaemonSet
+  sidecars:
+    - kiwigrid/k8s-sidecar                                          # Grafana and Loki config reloader
+    - brancz/kube-rbac-proxy                                        # metrics auth proxy
+    - sig-storage/csi-*                                             # CSI driver sidecars
+    - sig-storage/livenessprobe
+    - aquasecurity/node-collector                                   # trivy-operator's node scan job
+  # Software with no advisory in GHSA, OSV or NVD (checked 2026-11-06).
+  no-advisory-source:
+    - metrics-server/metrics-server
+    - rancher/hardened-k8s-metrics-server
+    - aquasec/trivy-operator
+    - aquasecurity/trivy-operator
+    - k8snetworkplumbingwg/multus-*
+    - rancher/hardened-multus-*
+    - rancher/hardened-dns-node-cache                               # node-local-dns (k8s-dns-node-cache)
+    - dns/k8s-dns-node-cache

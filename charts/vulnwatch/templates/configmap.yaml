@@ -1,0 +1,26 @@
+{{- if and .Values.stack .Values.existingStackConfigMap.name }}
+{{- fail "set either values.stack or values.existingStackConfigMap.name, not both" }}
+{{- end }}
+{{- if not (or .Values.stack .Values.existingStackConfigMap.name) }}
+{{- fail "stack.yaml is required: set values.stack (inline) or values.existingStackConfigMap.name" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vulnwatch.fullname" . }}
+  labels:
+    {{- include "vulnwatch.labels" . | nindent 4 }}
+data:
+  # Built-in defaults (files/, copies of defaults/), layered with the overrides below.
+  config.yaml: |
+    {{- .Files.Get "files/config.yaml" | nindent 4 }}
+  config-override.yaml: |
+    {{- include "vulnwatch.configOverride" . | nindent 4 }}
+  sources.yaml: |
+    {{- .Files.Get "files/sources.yaml" | nindent 4 }}
+  sources-override.yaml: |
+    {{- include "vulnwatch.sourcesOverride" . | nindent 4 }}
+  {{- if .Values.stack }}
+  stack.yaml: |
+    {{- toYaml .Values.stack | nindent 4 }}
+  {{- end }}

@@ -1,0 +1,33 @@
+# Optional site-specific overrides, layered on top of sources.yaml:
+#   vulnwatch --sources sources.yaml --sources sources-override.yaml ...
+#   VULNWATCH_SOURCES=sources.yaml,sources-override.yaml
+# Same schema as sources.yaml: only sources, catalog and helm_charts. Settings
+# such as triage.language go in a config override (--app-config, repeatable).
+#   - maps merge key by key (this file wins)
+#   - lists REPLACE the list from the earlier file
+#   - any source or catalog product can be disabled with `enabled: false`
+version: 1
+
+sources:
+  nvd:
+    request_interval: 8s        # be gentler with NVD than the default
+
+catalog:
+  # Add a product that is not in sources.yaml.
+  velero:
+    aliases: [vmware-velero]
+    ghsa: [velero-io/velero]
+    osv:
+      - { ecosystem: Go, package: github.com/vmware-tanzu/velero }
+    nvd: ["cpe:2.3:a:vmware:velero"]
+    rss: []
+
+  # Replace a list: also watch Drupal contrib advisories (noisy).
+  drupal:
+    rss:
+      - https://www.drupal.org/security/rss.xml
+      - https://www.drupal.org/security/contrib/rss.xml
+
+  # Switch off a product from sources.yaml entirely.
+  mariadb:
+    enabled: false

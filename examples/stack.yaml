@@ -1,0 +1,76 @@
+# An example stack: what you run. Only product names and version
+# constraints; vulnwatch knows where to look (see `vulnwatch catalog list`).
+# The versions are examples, not a recommendation.
+#
+# Version constraints: exact ("1.8.1"), wildcards ("26.x", "26.1.x"),
+# ranges (">=10.4 <11"), "*" (all versions; matching is left to triage) and
+# unions ("20.0.3 || 26.7.0"). A partial version without wildcard ("1.8")
+# means "1.8.x". Exact versions give the most precise matches.
+
+defaults:
+  min_cvss: 4.0          # ignore findings below this unless KEV-listed
+  exposure: internal     # internet | internal
+  criticality: medium    # high | medium | low
+
+# Helm releases: vulnwatch downloads each chart and reads the product
+# versions from it (mapping: helm_charts in sources.yaml). A product deployed
+# by several charts, or also listed under products, is checked for every
+# version. Optional per release: exposure, criticality, min_cvss, and
+# versions: {product: version} when your values pin a different image.
+helm:
+  - { repo: https://argoproj.github.io/argo-helm, chart: argo-cd, version: 10.9.7 }
+  - { repo: https://charts.jetstack.io, chart: cert-manager, version: v1.20.5 }
+  - { repo: https://cloudnative-pg.io/charts/, chart: cloudnative-pg, version: 0.28.3 }
+  - { repo: https://charts.external-secrets.io, chart: external-secrets, version: 2.12.0 }
+  - { repo: https://prometheus-community.github.io/helm-charts, chart: kube-prometheus-stack, version: 85.4.0 }
+  - { repo: https://grafana.github.io/helm-charts, chart: loki, version: 7.2.0 }
+  - { repo: https://helm.releases.hashicorp.com, chart: vault, version: 0.33.0, exposure: internet }
+  - { repo: https://charts.longhorn.io, chart: longhorn, version: 1.10.2 }
+  - { repo: https://helm.goharbor.io, chart: harbor, version: 1.18.4 }
+  - repo: https://charts.min.io/
+    chart: minio
+    version: 5.4.0
+    versions:
+      minio: RELEASE.2025-04-22T22-12-26Z   # the values pin a newer image than the chart default
+
+# The nodes' OS: the kernel they run is watched as the product debian-13-kernel
+# (stack discover fills this in). Names: debian, ubuntu, rhel, rocky,
+# almalinux, sles, opensuse-leap.
+os:
+  name: debian
+  release: "13"
+  kernel: "6.12.48 || 6.12.62"         # the nodes run two kernels
+  criticality: high
+
+# Everything not deployed by a public Helm chart.
+products:
+  # short form: name: version constraint
+  rke2: "v1.34.2+rke2r1"
+  kubernetes: ">=1.33.0"               # every cluster (1.33 and newer)
+  cilium: "1.18.x"
+  postgresql: "17.4"
+  renovate: "43"
+  go: "1.26.x"                         # toolchain your own services are built with
+
+  # long form when the defaults don't fit
+  keycloak:
+    version: "26.7.0"
+    exposure: internet
+    criticality: high
+  gitlab-ce:
+    version: "19.4.x"
+    exposure: internet
+
+# Other stacks watched from here: customers, organizations or teams, per
+# environment. Build them with
+#   vulnwatch stack merge stack.yaml --context <ctx> --tenant <t> --environment <e>
+# tenants:
+#   acme:
+#     defaults: { exposure: internet }
+#     slack: { channel: C0ACME }        # acme's summary and P1 alerts
+#     environments:
+#       prod:
+#         products: { keycloak: "25.0.6" }
+#         os: { name: rhel, release: "9.4", kernel: "5.14.0-427.13.1.el9_4" }
+#       stage:
+#         products: { keycloak: "26.0.1" }

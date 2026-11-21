@@ -1,0 +1,45 @@
+{
+  "_kubernetes_io": {
+    "feed_refresh_job": "https://testgrid.k8s.io/sig-security-cve-feed#auto-refreshing-official-cve-feed",
+    "updated_at": "2026-10-12T13:49:50Z"
+  },
+  "authors": [
+    {
+      "name": "Kubernetes Community",
+      "url": "https://www.kubernetes.dev"
+    }
+  ],
+  "description": "Auto-refreshing official CVE feed for Kubernetes repository",
+  "feed_url": "https://kubernetes.io/docs/reference/issues-security/official-cve-feed/index.json",
+  "home_page_url": "https://kubernetes.io",
+  "items": [
+    {
+      "_kubernetes_io": {
+        "google_group_url": "https://groups.google.com/g/kubernetes-announce/search?q=CVE-2026-76654",
+        "issue_number": 142098
+      },
+      "content_text": "CVSS Rating: [CVSS:3.1/AV:N/AC:H/PR:H/UI:N/S:C/C:H/I:N/A:N](https://www.first.org/cvss/calculator/3.1#CVSS:3.1/AV:N/AC:H/PR:H/UI:N/S:C/C:H/I:N/A:N) - Medium (5.8)\n\nAn NTLM coercion vulnerability exists on Windows nodes when the subPath supplied in a pod's volumeMounts is set to a symbolic link that points to an attacker-controlled network share. When a kubelet resolves symlinks, it does not reject a target that resolves to a UNC path. As a result, the kubelet will transparently attempt to authenticate to the share using NTLM. \n\nThis allows an attacker to obtain the NetNTLMv2 hash of the account under which the kubelet is running. An attacker could then attempt to crack the hash to retrieve the corresponding password or relay it to impersonate the node, if the node is domain-joined.\n\n#### Affected Versions\n\nkubelet: <= v1.34.11\nkubelet: <= v1.35.8\nkubelet: <= v1.36.4\nkubelet: = v1.37.0\n\n### How do I mitigate this vulnerability?\n\nThis issue can be mitigated by upgrading to a fixed kubelet version. The fixed versions update kubelet to refuse UNC symlink targets on Windows.\n\n#### Fixed Versions\n\nkubelet: >= v1.34.12\nkubelet: >= v1.35.9\nkubelet: >= v1.36.5\nkubelet: >= v1.37.1\n\nIf you find evidence that this vulnerability has been exploited, please contact [security@kubernetes.io](mailto:security@kubernetes.io)\n\n#### Acknowledgements\n\nThis vulnerability was reported by the Kubernetes Third-Party Security Audit subproject, OSTIF, and Shielder.\n\nThe issue was fixed and coordinated by: \n\nYuanliang Zhang @zylxjtu\nVer\u00f3nica L\u00f3pez @Verolop\nJeremy Rickard @jeremyrickard\nNathan Herz @natherz97",
+      "date_published": "2026-09-14T16:42:26Z",
+      "external_url": "https://www.cve.org/cverecord?id=CVE-2026-76654",
+      "id": "CVE-2026-76654",
+      "status": "fixed",
+      "summary": "Subpath symlinking on Windows nodes permits NTLM coercion",
+      "url": "https://github.com/kubernetes/kubernetes/issues/142098"
+    },
+    {
+      "_kubernetes_io": {
+        "google_group_url": "https://groups.google.com/g/kubernetes-announce/search?q=CVE-2026-2270",
+        "issue_number": 142097
+      },
+      "content_text": "CVSS Rating: [CVSS:3.1/AV:N/AC:H/PR:H/UI:N/S:U/C:H/I:H/A:N](https://www.first.org/cvss/calculator/3.1#CVSS:3.1/AV:N/AC:H/PR:H/UI:N/S:U/C:H/I:H/A:N) - Medium (5.9)\n\nA confused deputy attack exists in the StatefulSet controller that allows a user with namespace-scoped write permissions on StatefulSet and ControllerRevision objects to create a cross-namespace pod. An attacker exploiting this vulnerability would have full control over the resulting pod\u2019s metadata and specification, including namespace selection. Note that the cross-namespace pod will be immediately deleted by the garbage collector unless the attacker is able to construct a valid StatefulSet OwnerReference. This would require referencing the UID of an existing StatefulSet in the victim\u2019s namespace.\n\n#### Affected Versions\n\nkube-controller-manager: <= v1.34.11\nkube-controller-manager: <= v1.35.8\nkube-controller-manager: <= v1.36.4\nkube-controller-manager: = v1.37.0\n### How do I mitigate this vulnerability?\n\nThis issue can be mitigated by upgrading to a fixed kube-controller-manager version. The fixed versions are patched to ensure that only the spec field in StatefulSets will be restored from ControllerRevisions.\n\n#### Fixed Versions\n\nkube-controller-manager: >= v1.34.12\nkube-controller-manager: >= v1.35.9\nkube-controller-manager: >= v1.36.5\nkube-controller-manager: >= v1.37.1\n\nIf you find evidence that this vulnerability has been exploited, please contact [security@kubernetes.io](mailto:security@kubernetes.io)\n\n#### Acknowledgements\n\nThis vulnerability was reported by ImanOracle.\n\nThe issue was fixed and coordinated by: \n\nMaciej Szulik @soltysh\nFilip K\u0159epinsk\u00fd @atiratree\nVer\u00f3nica L\u00f3pez @Verolop\nJeremy Rickard @jeremyrickard\nNathan Herz @natherz97",
+      "date_published": "2026-09-14T16:42:20Z",
+      "external_url": "https://www.cve.org/cverecord?id=CVE-2026-2270",
+      "id": "CVE-2026-2270",
+      "status": "fixed",
+      "summary": "StatefulSet and ControllerRevision write permissions allow cross-namespace pod creation",
+      "url": "https://github.com/kubernetes/kubernetes/issues/142097"
+    }
+  ],
+  "title": "Kubernetes Vulnerability Announcements - CVE Feed",
+  "version": "https://jsonfeed.org/version/1.1"
+}

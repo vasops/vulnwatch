@@ -1,0 +1,33 @@
+# Mac
+.DS_Store
+
+# Editor
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.claude
+
+# Generic
+*.log
+*.backup
+*.local.sh
+*.local.yml
+*.local.yaml
+*.local.json
+*.local.txt
+temp
+
+# Build output and local state
+bin/
+*.db
+*.db-shm
+*.db-wal
+report.html
+
+# CI caches and artifacts
+.go/
+dist/
+coverage.out
+trivy-report.html

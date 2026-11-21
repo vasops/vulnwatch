@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>vulnwatch report {{.Until.Format "2006-01-02"}}</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDY0IDY0IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9InZ1bG53YXRjaCI+PHRpdGxlPnZ1bG53YXRjaDwvdGl0bGU+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTYiIGZpbGw9IiMwQjE0MTAiLz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSg0IDQpIHNjYWxlKDAuODc1KSI+PGNpcmNsZSBjeD0iMzIiIGN5PSIzMiIgcj0iMjQiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzVCRTM4QSIgc3Ryb2tlLXdpZHRoPSIxMCIvPjxjaXJjbGUgY3g9IjQ0IiBjeT0iNDQiIHI9IjEyIiBmaWxsPSIjRkZCNTQ3Ii8+PC9nPjwvc3ZnPg==">
+<style>
+:root{--mark:#138A4A;--blip:#E08A00;--bg:#fafaf9;--fg:#1c1917;--muted:#78716c;--card:#fff;--border:#e7e5e4;--p1:#b91c1c;--p2:#b45309;--p3:#1d4ed8;--p4:#57534e;--kev:#b91c1c;--link:#1d4ed8}
+@media (prefers-color-scheme:dark){:root{--mark:#5BE38A;--blip:#FFB547;--bg:#1c1917;--fg:#f5f5f4;--muted:#a8a29e;--card:#292524;--border:#44403c;--p1:#f87171;--p2:#fbbf24;--p3:#93c5fd;--p4:#a8a29e;--kev:#f87171;--link:#93c5fd}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:960px;margin:0 auto;padding:24px 16px}
+h1{font-size:1.5rem;margin:0 0 4px;display:flex;align-items:center;gap:10px}
+.mark{width:36px;height:36px;flex:none}
+h2{font-size:1.15rem;margin:32px 0 8px;padding-bottom:4px;border-bottom:2px solid currentColor}
+h3{font-size:1rem;margin:16px 0 8px}
+.muted{color:var(--muted)}
+.counts{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}
+.count{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 12px;min-width:84px}
+.count b{display:block;font-size:1.3rem}
+.P1{color:var(--p1)}.P2{color:var(--p2)}.P3{color:var(--p3)}.P4{color:var(--p4)}
+.item{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin:8px 0}
+.item header{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline}
+.id{font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
+.badge{font-size:.78rem;border:1px solid var(--border);border-radius:999px;padding:1px 8px;white-space:nowrap}
+.kev{color:var(--kev);border-color:var(--kev);font-weight:600}
+.item p{margin:6px 0}
+.links a{color:var(--link);word-break:break-all;display:block;font-size:.85rem}
+.empty{font-size:1.2rem;font-weight:600;padding:24px 0}
+.warn{border-left:4px solid var(--p2);padding:8px 12px;background:var(--card)}
+.id a{color:var(--link)}
+.adv{font-size:.85rem;white-space:nowrap}
+.adv a{color:var(--link)}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)}
+</style>
+</head>
+<body>
+<main>
+<h1><svg class="mark" viewBox="0 0 64 64" role="img" aria-label="vulnwatch"><circle cx="32" cy="32" r="27" fill="none" stroke="var(--mark)" stroke-width="3"/><circle cx="32" cy="32" r="15" fill="none" stroke="var(--mark)" stroke-width="2" opacity="0.45"/><path d="M32 32 L32 5 A27 27 0 0 1 55.4 18.5 Z" fill="var(--mark)" opacity="0.28"/><path d="M32 32 L55.4 18.5" stroke="var(--mark)" stroke-width="3" stroke-linecap="round"/><circle cx="32" cy="32" r="3" fill="var(--mark)"/><circle cx="44" cy="42" r="4.5" fill="var(--blip)"/></svg>vulnwatch report{{if ne .Mode "run"}} ({{.Mode}}){{end}}</h1>
+<div class="muted">Window {{.Since.Format "2006-01-02 15:04"}} → {{.Until.Format "2006-01-02 15:04 MST"}} · generated {{.GeneratedAt.Format "2006-01-02 15:04 MST"}}</div>
+{{if .MultiTenant}}<div class="muted">Tenants: {{range $i, $s := .Scopes}}{{if $i}}, {{end}}{{$s}}{{end}} · {{len .Products}} products</div>{{else}}<div class="muted">Products: {{range $i, $p := .Products}}{{if $i}}, {{end}}{{$p.Name}} {{$p.Constraint}}{{end}}</div>{{end}}
+
+<div class="counts">
+{{range .Counts}}<div class="count {{.Priority}}"><b>{{.Count}}</b>{{.Priority}}</div>{{end}}
+<div class="count muted"><b>{{.NotRelevant}}</b>not relevant</div>
+<div class="count muted"><b>{{.BelowThreshold}}</b>below threshold</div>
+<div class="count muted"><b>{{.Unchanged}}</b>already reported</div>
+<div class="count muted"><b>{{len .Open}}</b>still open</div>
+{{if .ImageFiltered}}<div class="count muted"><b>{{.ImageFiltered}}</b>image findings filtered</div>{{end}}
+{{if .KernelFiltered}}<div class="count muted"><b>{{.KernelFiltered}}</b>kernel fixes filtered</div>{{end}}
+</div>
+
+{{if .Empty}}<div class="empty">No new findings.</div>{{end}}
+
+{{if .Baselines}}{{$found := .BaselinesFound}}{{$clean := .BaselinesClean}}
+<h2>Full history checked · {{len .Baselines}} products</h2>
+<p class="muted">New products and changed versions are checked against every known advisory; what affects us is listed under Still open.</p>
+{{if $found}}<div class="scroll"><table>
+<tr><th>Product</th><th>Version(s)</th><th>Why</th><th>Result</th></tr>
+{{range $found}}<tr><td>{{with .Scope}}<span class="muted">{{.}}</span> {{end}}<b>{{.Product}}</b></td><td>{{.Constraint}}</td><td class="muted">{{.Reason}}</td><td>{{.Facts}}</td></tr>{{end}}
+</table></div>{{end}}
+{{if $clean}}<p class="muted">+ {{len $clean}} with nothing affecting the deployed version: {{names $clean}}</p>{{end}}
+{{end}}
+
+{{range .Groups}}
+<h2 class="{{.Priority}}">{{.Priority}} · {{.Label}}</h2>
+{{range .Products}}
+<h3>{{with .Scope}}<span class="muted">{{.}}</span> {{end}}{{.Product}} <span class="muted">(we run {{.Constraint}})</span></h3>
+{{range .Items}}
+<article class="item">
+<header>
+<span class="id">{{.ID}}</span>
+{{template "advisories" .Advisories}}
+{{if .CVSS}}<span class="badge">CVSS {{printf "%.1f" .CVSS}}</span>{{end}}
+<span class="badge">{{.Severity}}</span>
+{{if .KEV}}<span class="badge kev">KEV</span>{{end}}
+{{if .EPSS}}<span class="badge">EPSS {{printf "%.1f" (pct .EPSS)}}%</span>{{end}}
+<span class="badge">match: {{.Match}}</span>
+{{if .ImageOnly}}<span class="badge">image only</span>{{else if .Packages}}<span class="badge">confirmed in image</span>{{end}}
+{{if ne .Change "new"}}<span class="badge">updated</span>{{end}}
+</header>
+{{if ne .Change "new"}}<p class="muted">Changed: {{.Change}}</p>{{end}}
+{{if and .Title (ne .Title .Summary)}}<p><b>{{.Title}}</b></p>{{end}}
+<p>{{.Summary}}</p>
+{{if .Fixed}}<p><b>Fixed in:</b> {{join .Fixed ", "}}</p>{{end}}
+{{if .Packages}}<p><b>In images:</b> {{pkgs .Packages}}</p>{{end}}
+<p><b>Action:</b> {{.Action}}</p>
+{{if .Triaged}}<p class="muted">{{.Reasoning}}</p>{{else}}<p class="muted">({{.TriageNote}})</p>{{end}}
+{{if .Links}}<div class="links">{{range .Links}}<a href="{{.}}" rel="noopener noreferrer">{{.}}</a>{{end}}</div>{{end}}
+</article>
+{{end}}
+{{end}}
+{{end}}
+
+
+{{if or .Open .OpenUnknown}}
+<h2>Still open · {{len .Open}}</h2>
+{{if .Open}}
+<p class="muted">Reported earlier and still affecting the versions in stack.yaml.</p>
+<div class="scroll"><table>
+<tr><th>Priority</th><th>Product</th><th>ID</th><th>Severity</th><th>Fixed in</th><th>Open</th></tr>
+{{range .Open}}<tr>
+<td class="{{.Priority}}"><b>{{.Priority}}</b></td>
+<td>{{with .Scope}}<span class="muted">{{.}}</span> {{end}}{{.Product}} <span class="muted">{{.Constraint}}</span></td>
+<td><span class="id">{{if .Link}}<a href="{{.Link}}" rel="noopener noreferrer">{{.ID}}</a>{{else}}{{.ID}}{{end}}</span>{{if .KEV}} <span class="badge kev">KEV</span>{{end}}<br><span class="muted">{{.Title}}{{if .ImageOnly}} · image only{{else if .NoVersionData}} · no version data; clears when you upgrade{{else if ne .Match "affected"}} · depends on exact version{{end}}</span>{{if .Packages}}<br><span class="muted">In images: {{pkgs .Packages}}</span>{{end}}{{if .Advisories}}<br>{{template "advisories" .Advisories}}{{end}}</td>
+<td>{{.Severity}}{{if .CVSS}} {{printf "%.1f" .CVSS}}{{end}}</td>
+<td>{{join .Fixed ", "}}</td>
+<td>{{.DaysOpen}}d</td>
+</tr>{{end}}
+</table></div>
+{{end}}
+{{if .OpenUnknown}}<p class="muted">+ {{.OpenUnknown}} findings not listed: they give no affected versions, so vulnwatch can't tell whether ours is affected (or the product is tracked with "*").</p>{{end}}
+{{end}}
+{{if .UnmatchedImages}}<p class="muted">Trivy scanned {{len .UnmatchedImages}} images that belong to no product in the stack (add them to the catalog with images:): {{imgs .UnmatchedImages}}</p>{{end}}
+
+{{if .Warnings}}
+<h2>Warnings</h2>
+{{range .Warnings}}<p class="warn">{{.}}</p>{{end}}
+{{end}}
+</main>
+</body>
+</html>
+{{- define "advisories"}}{{if .}}<span class="adv">{{range $i, $a := .}}{{if $i}} · {{end}}<a href="{{$a.URL}}" rel="noopener noreferrer" title="{{$a.ID}}">{{$a.Source}}</a>{{end}}</span>{{end}}{{end}}

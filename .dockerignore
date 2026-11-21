@@ -1,0 +1,7 @@
+.git
+.idea
+bin
+temp
+*.db
+*.db-*
+report.html

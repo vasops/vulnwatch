@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>vulnwatch report 2026-10-12</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDY0IDY0IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9InZ1bG53YXRjaCI+PHRpdGxlPnZ1bG53YXRjaDwvdGl0bGU+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTYiIGZpbGw9IiMwQjE0MTAiLz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSg0IDQpIHNjYWxlKDAuODc1KSI+PGNpcmNsZSBjeD0iMzIiIGN5PSIzMiIgcj0iMjQiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzVCRTM4QSIgc3Ryb2tlLXdpZHRoPSIxMCIvPjxjaXJjbGUgY3g9IjQ0IiBjeT0iNDQiIHI9IjEyIiBmaWxsPSIjRkZCNTQ3Ii8+PC9nPjwvc3ZnPg==">
+<style>
+:root{--mark:#138A4A;--blip:#E08A00;--bg:#fafaf9;--fg:#1c1917;--muted:#78716c;--card:#fff;--border:#e7e5e4;--p1:#b91c1c;--p2:#b45309;--p3:#1d4ed8;--p4:#57534e;--kev:#b91c1c;--link:#1d4ed8}
+@media (prefers-color-scheme:dark){:root{--mark:#5BE38A;--blip:#FFB547;--bg:#1c1917;--fg:#f5f5f4;--muted:#a8a29e;--card:#292524;--border:#44403c;--p1:#f87171;--p2:#fbbf24;--p3:#93c5fd;--p4:#a8a29e;--kev:#f87171;--link:#93c5fd}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:960px;margin:0 auto;padding:24px 16px}
+h1{font-size:1.5rem;margin:0 0 4px;display:flex;align-items:center;gap:10px}
+.mark{width:36px;height:36px;flex:none}
+h2{font-size:1.15rem;margin:32px 0 8px;padding-bottom:4px;border-bottom:2px solid currentColor}
+h3{font-size:1rem;margin:16px 0 8px}
+.muted{color:var(--muted)}
+.counts{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}
+.count{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 12px;min-width:84px}
+.count b{display:block;font-size:1.3rem}
+.P1{color:var(--p1)}.P2{color:var(--p2)}.P3{color:var(--p3)}.P4{color:var(--p4)}
+.item{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin:8px 0}
+.item header{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline}
+.id{font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
+.badge{font-size:.78rem;border:1px solid var(--border);border-radius:999px;padding:1px 8px;white-space:nowrap}
+.kev{color:var(--kev);border-color:var(--kev);font-weight:600}
+.item p{margin:6px 0}
+.links a{color:var(--link);word-break:break-all;display:block;font-size:.85rem}
+.empty{font-size:1.2rem;font-weight:600;padding:24px 0}
+.warn{border-left:4px solid var(--p2);padding:8px 12px;background:var(--card)}
+.id a{color:var(--link)}
+.adv{font-size:.85rem;white-space:nowrap}
+.adv a{color:var(--link)}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)}
+</style>
+</head>
+<body>
+<main>
+<h1><svg class="mark" viewBox="0 0 64 64" role="img" aria-label="vulnwatch"><circle cx="32" cy="32" r="27" fill="none" stroke="var(--mark)" stroke-width="3"/><circle cx="32" cy="32" r="15" fill="none" stroke="var(--mark)" stroke-width="2" opacity="0.45"/><path d="M32 32 L32 5 A27 27 0 0 1 55.4 18.5 Z" fill="var(--mark)" opacity="0.28"/><path d="M32 32 L55.4 18.5" stroke="var(--mark)" stroke-width="3" stroke-linecap="round"/><circle cx="32" cy="32" r="3" fill="var(--mark)"/><circle cx="44" cy="42" r="4.5" fill="var(--blip)"/></svg>vulnwatch report</h1>
+<div class="muted">Window 2026-10-10 06:00 → 2026-10-12 06:00 UTC · generated 2026-10-12 06:00 UTC</div>
+<div class="muted">Products: argocd 3.x, keycloak 26.x, longhorn 1.8.1</div>
+
+<div class="counts">
+<div class="count P1"><b>1</b>P1</div><div class="count P2"><b>0</b>P2</div><div class="count P3"><b>1</b>P3</div><div class="count P4"><b>0</b>P4</div>
+<div class="count muted"><b>1</b>not relevant</div>
+<div class="count muted"><b>2</b>below threshold</div>
+<div class="count muted"><b>5</b>already reported</div>
+<div class="count muted"><b>2</b>still open</div>
+
+
+</div>
+
+
+
+
+<h2>Full history checked · 3 products</h2>
+<p class="muted">New products and changed versions are checked against every known advisory; what affects us is listed under Still open.</p>
+<div class="scroll"><table>
+<tr><th>Product</th><th>Version(s)</th><th>Why</th><th>Result</th></tr>
+<tr><td><b>keycloak</b></td><td>26.x</td><td class="muted">version changed</td><td>412 advisories checked · 3 affected · 2 depend on the exact version · 1 exploited (KEV)</td></tr><tr><td><b>argocd</b></td><td>3.x</td><td class="muted">new</td><td>80 advisories checked · incomplete: a source failed, checked again next run</td></tr>
+</table></div>
+<p class="muted">+ 1 with nothing affecting the deployed version: longhorn</p>
+
+
+
+<h2 class="P1">P1 · Act today</h2>
+
+<h3>keycloak <span class="muted">(we run 26.x)</span></h3>
+
+<article class="item">
+<header>
+<span class="id">CVE-2026-1001</span>
+<span class="adv"><a href="https://example.invalid/nvd/CVE-2026-1001" rel="noopener noreferrer" title="CVE-2026-1001">NVD</a> · <a href="https://example.invalid/gh/GHSA-abcd-efgh-ijkl" rel="noopener noreferrer" title="GHSA-abcd-efgh-ijkl">GitHub</a></span>
+<span class="badge">CVSS 9.8</span>
+<span class="badge">critical</span>
+<span class="badge kev">KEV</span>
+<span class="badge">EPSS 91.2%</span>
+<span class="badge">match: affected</span>
+
+
+</header>
+
+<p><b>Account takeover via crafted &lt;redirect_uri&gt;</b></p>
+<p>An attacker can take over accounts by abusing redirect URI validation.</p>
+<p><b>Fixed in:</b> 26.1.4</p>
+
+<p><b>Action:</b> Upgrade to 26.1.4 today.</p>
+<p class="muted">Internet-facing, all 26.x before 26.1.4 affected, exploited in the wild.</p>
+<div class="links"><a href="https://example.invalid/advisory/1" rel="noopener noreferrer">https://example.invalid/advisory/1</a><a href="https://example.invalid/nvd/1" rel="noopener noreferrer">https://example.invalid/nvd/1</a></div>
+</article>
+
+
+
+<h2 class="P3">P3 · Next maintenance</h2>
+
+<h3>argocd <span class="muted">(we run 3.x)</span></h3>
+
+<article class="item">
+<header>
+<span class="id">GHSA-xxxx-yyyy-zzzz</span>
+<span class="adv"><a href="https://example.invalid/gh/GHSA-xxxx-yyyy-zzzz" rel="noopener noreferrer" title="GHSA-xxxx-yyyy-zzzz">GitHub</a></span>
+<span class="badge">CVSS 7.5</span>
+<span class="badge">high</span>
+
+
+<span class="badge">match: unknown</span>
+
+<span class="badge">updated</span>
+</header>
+<p class="muted">Changed: fixed version released: 3.1.8</p>
+
+<p>Repo server path traversal</p>
+<p><b>Fixed in:</b> 3.1.8, 3.0.15</p>
+
+<p><b>Action:</b> Check the deployed version; upgrade to a fixed version (3.1.8, 3.0.15) if affected.</p>
+<p class="muted">(not triaged: LLM output invalid or unavailable)</p>
+<div class="links"><a href="https://example.invalid/advisory/2" rel="noopener noreferrer">https://example.invalid/advisory/2</a></div>
+</article>
+
+
+
+
+
+
+<h2>Still open · 2</h2>
+
+<p class="muted">Reported earlier and still affecting the versions in stack.yaml.</p>
+<div class="scroll"><table>
+<tr><th>Priority</th><th>Product</th><th>ID</th><th>Severity</th><th>Fixed in</th><th>Open</th></tr>
+<tr>
+<td class="P1"><b>P1</b></td>
+<td>keycloak <span class="muted">26.x</span></td>
+<td><span class="id"><a href="https://example.invalid/nvd/1" rel="noopener noreferrer">CVE-2026-0900</a></span> <span class="badge kev">KEV</span><br><span class="muted">Token leak in admin console</span><br><span class="adv"><a href="https://example.invalid/nvd/CVE-2026-0900" rel="noopener noreferrer" title="CVE-2026-0900">NVD</a> · <a href="https://example.invalid/gh/GHSA-mnop-qrst-uvwx" rel="noopener noreferrer" title="GHSA-mnop-qrst-uvwx">GitHub</a></span></td>
+<td>high 8.8</td>
+<td></td>
+<td>14d</td>
+</tr><tr>
+<td class="P3"><b>P3</b></td>
+<td>argocd <span class="muted">3.x</span></td>
+<td><span class="id">CVE-2026-0800</span><br><span class="muted">Repo server &lt;script&gt; injection · depends on exact version</span><br><span class="adv"><a href="https://example.invalid/nvd/CVE-2026-0800" rel="noopener noreferrer" title="CVE-2026-0800">NVD</a></span></td>
+<td>medium 6.5</td>
+<td>3.1.2</td>
+<td>30d</td>
+</tr>
+</table></div>
+
+<p class="muted">+ 3 findings not listed: they give no affected versions, so vulnwatch can't tell whether ours is affected (or the product is tracked with "*").</p>
+
+
+
+
+<h2>Warnings</h2>
+<p class="warn">nvd/keycloak: GET https://example.invalid: HTTP 503</p>
+
+</main>
+</body>
+</html>

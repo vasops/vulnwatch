@@ -1,0 +1,111 @@
+{{- if .Values.metrics.prometheusRule.enabled }}
+{{- $r := .Values.metrics.prometheusRule }}
+{{- $sel := printf "job=%q" (.Values.metrics.pushgateway.job | default "vulnwatch") }}
+# Alerts on vulnwatch's own health and on what it found. The VictoriaMetrics
+# operator converts PrometheusRule objects into VMRules automatically.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "vulnwatch.fullname" . }}
+  namespace: {{ $r.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "vulnwatch.labels" . | nindent 4 }}
+    {{- with $r.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: vulnwatch
+      rules:
+        - alert: VulnwatchRunFailed
+          expr: max by (job, instance) (vulnwatch_run_success{ {{- $sel -}} }) == 0
+          for: 5m
+          labels:
+            severity: warning
+            {{- with $r.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: The last vulnwatch run failed
+            description: The last run failed or an output (e.g. Slack) did not succeed; findings will be reported again on the next run. Check the job logs.
+        - alert: VulnwatchNoRecentSuccess
+          expr: time() - max by (job, instance) (vulnwatch_last_success_timestamp_seconds{ {{- $sel -}} }) > {{ mul $r.maxRunAgeHours 3600 }}
+          for: 10m
+          labels:
+            severity: warning
+            {{- with $r.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: No successful vulnwatch run for more than {{ $r.maxRunAgeHours }}h
+            description: New vulnerabilities are not being reported. Check the CronJob, its last job and the Pushgateway.
+        - alert: VulnwatchMetricsAbsent
+          expr: absent(vulnwatch_run_timestamp_seconds{ {{- $sel -}} })
+          for: {{ $r.maxRunAgeHours }}h
+          labels:
+            severity: warning
+            {{- with $r.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: vulnwatch has not pushed metrics for {{ $r.maxRunAgeHours }}h
+            description: Either no run happened or the push to the Pushgateway fails (see the job log for "push metrics").
+        # A source that answers without errors but finds nothing (API or
+        # format change, broken matching) is otherwise invisible. Advisory
+        # sources only: enrichers and the local ones may well return nothing.
+        - alert: VulnwatchSourceSilent
+          expr: max by (job, instance, source) (max_over_time(vulnwatch_source_findings{ {{- $sel -}} ,source=~"cvelist|nvd|osv|ghsa"}[7d])) == 0
+          labels:
+            severity: warning
+            {{- with $r.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: Advisory source {{ "{{ $labels.source }}" }} returned no findings for 7 days
+            description: '{{ "{{ $labels.source }}" }} returned 0 raw findings in every run for 7 days; its API, format or our matching may have changed. Check `vulnwatch sources test` and the run logs.'
+        - alert: VulnwatchSourceFailing
+          expr: max by (job, instance, source) (vulnwatch_source_errors{ {{- $sel -}} }) > 0
+          for: {{ $r.sourceFailingFor }}
+          labels:
+            severity: warning
+            {{- with $r.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: Advisory source {{ "{{ $labels.source }}" }} failed in the last run
+            description: '{{ "{{ $value }}" }} requests to {{ "{{ $labels.source }}" }} failed; it keeps its window start, so the next run that reaches it fetches what it missed. Check the job log for its errors.'
+        - alert: VulnwatchTriageFailing
+          expr: max by (job, instance) (vulnwatch_triage_failures{ {{- $sel -}} }) > 0
+          for: 5m
+          labels:
+            severity: warning
+            {{- with $r.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: Claude triage failed in the last vulnwatch run
+            description: '{{ "{{ $value }}" }} Claude triage call(s) failed (API error or invalid output); their findings got the rule-based priority and are asked again in a later run. Check the job log, the API key and triage.model.'
+        # Only for stacks with generated_at (written by stack discover and
+        # stack merge): what runs there may have changed since.
+        - alert: VulnwatchInventoryStale
+          expr: (time() - max by (job, instance, tenant, environment) (vulnwatch_tenant_inventory_timestamp_seconds{ {{- $sel -}} })) / 86400 > {{ $r.inventoryMaxAgeDays }}
+          labels:
+            severity: warning
+            {{- with $r.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: '{{ "{{ $labels.tenant }}/{{ $labels.environment }}" }} inventory is older than {{ $r.inventoryMaxAgeDays }} days'
+            description: 'The stack of {{ "{{ $labels.tenant }}/{{ $labels.environment }}" }} was read from its cluster {{ "{{ $value | printf \"%.0f\" }}" }} days ago (generated_at); findings for what runs there now may be missing. Run stack merge (or stack diff) against its cluster and commit stack.yaml.'
+        {{- if $r.findingAlerts }}
+        # Not for products VulnwatchP1Open already alerts on.
+        - alert: VulnwatchExploitedVulnerabilityOpen
+          expr: >-
+            (max by (job, instance, tenant, environment, product) (vulnwatch_findings_open_kev{ {{- $sel -}} }) > 0)
+            unless on (job, instance, tenant, environment, product)
+            (max by (job, instance, tenant, environment, product) (vulnwatch_findings_open{ {{- $sel -}} ,priority="P1"}) > 0)
+          labels:
+            severity: warning
+            {{- with $r.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: '{{ "{{ $labels.tenant }}/{{ $labels.environment }} {{ $labels.product }}" }} is affected by a vulnerability exploited in the wild (CISA KEV)'
+            description: '{{ "{{ $value }}" }} open KEV-listed finding(s). See the vulnwatch report or Slack digest.'
+        - alert: VulnwatchP1Open
+          expr: max by (job, instance, tenant, environment, product) (vulnwatch_findings_open{ {{- $sel -}} ,priority="P1"}) > 0
+          labels:
+            severity: warning
+            {{- with $r.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: '{{ "{{ $labels.tenant }}/{{ $labels.environment }} {{ $labels.product }}" }} has open P1 vulnerabilities (act today)'
+            description: '{{ "{{ $value }}" }} open P1 finding(s) (KEV-listed ones included: VulnwatchExploitedVulnerabilityOpen stays quiet for this product). See the vulnwatch report or Slack digest.'
+        {{- end }}
+        {{- with $r.extraRules }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

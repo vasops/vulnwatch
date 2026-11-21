@@ -1,0 +1,7 @@
+vulnwatch report
+Window: 2026-10-11 06:00 → 2026-10-12 06:00 UTC
+Products: keycloak 26.x
+
+Summary: P1 0 · P2 0 · P3 0 · P4 0 | not relevant 0 | below threshold 0 | already reported 0 | still open 0
+
+No new findings.

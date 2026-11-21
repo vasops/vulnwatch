@@ -1,0 +1,44 @@
+{{- if .Values.news.enabled }}
+# vulnwatch news: new security bulletins and alerts, posted once, hourly by
+# default. Its own volume keeps what was posted.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "vulnwatch.fullname" . }}-news
+  labels:
+    {{- include "vulnwatch.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.news.schedule | quote }}
+  {{- with .Values.timeZone }}
+  timeZone: {{ . | quote }}
+  {{- end }}
+  suspend: {{ .Values.suspend }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: {{ .Values.failedJobsHistoryLimit }}
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "vulnwatch.labels" . | nindent 8 }}
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: {{ .Values.news.activeDeadlineSeconds }}
+      {{- with .Values.ttlSecondsAfterFinished }}
+      ttlSecondsAfterFinished: {{ . }}
+      {{- end }}
+      template:
+        metadata:
+          labels:
+            {{- include "vulnwatch.selectorLabels" . | nindent 12 }}
+            {{- with .Values.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+            {{- with .Values.podAnnotations }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        spec:
+          {{- include "vulnwatch.podSpec" (dict "ctx" . "args" (include "vulnwatch.newsArgs" . | fromYamlArray) "claim" (include "vulnwatch.newsClaimName" .)) | nindent 10 }}
+{{- end }}

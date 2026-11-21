@@ -1,0 +1,1 @@
+{"ok":true,"channel":"{{channel}}","ts":"{{ts}}","message":{"type":"message","subtype":"bot_message","text":"vulnwatch","ts":"{{ts}}","bot_id":"B0TEST"}}

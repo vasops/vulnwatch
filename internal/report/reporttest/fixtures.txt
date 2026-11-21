@@ -1,0 +1,6 @@
+https://example.invalid/advisory/1
+https://example.invalid/nvd/1
+https://example.invalid/advisory/2
+nvd/keycloak: GET https://example.invalid: HTTP 503
+https://example.invalid/nvd/{id}
+https://example.invalid/gh/{id}
