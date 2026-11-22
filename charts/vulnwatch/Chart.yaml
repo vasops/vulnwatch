@@ -7,7 +7,14 @@ appVersion: "0.18.0-dev"
 kubeVersion: ">=1.27.0-0"
 keywords: [security, vulnerabilities, cve, advisories, cronjob]
 home: https://github.com/vasops/vulnwatch
+icon: https://raw.githubusercontent.com/vasops/vulnwatch/main/logo/icon-512.png
 sources:
   - https://github.com/vasops/vulnwatch
 annotations:
   artifacthub.io/license: Apache-2.0
+  artifacthub.io/category: security
+  artifacthub.io/links: |
+    - name: support
+      url: https://github.com/vasops/vulnwatch/issues
+    - name: Documentation
+      url: https://github.com/vasops/vulnwatch#documentation

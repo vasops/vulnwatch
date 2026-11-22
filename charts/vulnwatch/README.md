@@ -1,6 +1,6 @@
 # vulnwatch Helm chart
 
-Runs [vulnwatch](../../README.md) as a daily Kubernetes **CronJob**, with its
+Runs [vulnwatch](https://github.com/vasops/vulnwatch#readme) as a daily Kubernetes **CronJob**, with its
 state on a PVC, metrics pushed to a Pushgateway, a Grafana dashboard and
 Prometheus alert rules.
 
@@ -31,7 +31,7 @@ What it creates:
 - **PVC** with the SQLite state and the latest `report.html` / `report.json`;
   kept on uninstall
 - **ConfigMap** with `stack.yaml`, the built-in `config.yaml` and
-  `sources.yaml` (copies of [`defaults/`](../../defaults)) and your overrides
+  `sources.yaml` (copies of [`defaults/`](https://github.com/vasops/vulnwatch/tree/main/defaults)) and your overrides
 - optional: a second CronJob running `vulnwatch news` hourly with its own
   PVC (`news.enabled`), bootstrap Job, Grafana dashboard ConfigMap, PrometheusRule,
   NetworkPolicy, read-only RBAC for trivy-operator reports, a Secret from
@@ -109,13 +109,13 @@ metrics:
 | `podSecurityContext.seccompProfile`                               | `RuntimeDefault`                                               | or a profile recorded with Security Profiles Operator (`type: Localhost`)                                                                                                                                                                                                                                        |
 
 Inside the pod, `run` restricts itself with Landlock to the files and ports it
-needs (see [Security](../../docs/security.md)). By default (`landlock:
+needs (see [Security](https://github.com/vasops/vulnwatch/blob/main/docs/security.md)). By default (`landlock:
 require`) a node that can't apply it fails the run (`vulnwatch_run_success`
 0) instead of running unrestricted; set `landlock: "true"` for best effort or
 `landlock: "false"` to turn it off.
 
-All values are validated by [`values.schema.json`](values.schema.json); see
-[`values.yaml`](values.yaml) for the rest (labels, annotations, security
+All values are validated by [`values.schema.json`](https://github.com/vasops/vulnwatch/blob/main/charts/vulnwatch/values.schema.json); see
+[`values.yaml`](https://github.com/vasops/vulnwatch/blob/main/charts/vulnwatch/values.yaml) for the rest (labels, annotations, security
 contexts, node placement).
 
 ## Metrics, dashboard and alerts
@@ -160,7 +160,7 @@ The **alert rules**:
 
 With [trivy-operator](https://github.com/aquasecurity/trivy-operator) in the
 same cluster, `trivy.enabled: true` adds the vulnerable packages it finds in
-the running images (see [Image findings](../../docs/how-it-works.md#image-findings-trivy)):
+the running images (see [Image findings](https://github.com/vasops/vulnwatch/blob/main/docs/how-it-works.md#image-findings-trivy)):
 
 - turns on `sources.trivy` in the sources override
 - creates a ClusterRole with `get` and `list` on
