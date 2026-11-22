@@ -2,8 +2,8 @@ apiVersion: v2
 name: vulnwatch
 description: Daily report of new vulnerabilities for the software you run (CronJob, Pushgateway metrics, Grafana dashboard).
 type: application
-version: 0.17.1
-appVersion: "0.17.1"
+version: 0.18.0-dev
+appVersion: "0.18.0-dev"
 kubeVersion: ">=1.27.0-0"
 keywords: [security, vulnerabilities, cve, advisories, cronjob]
 home: https://github.com/vasops/vulnwatch
