@@ -1,0 +1,53 @@
+{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "vulnwatch.claimName" . }}
+  labels:
+    {{- include "vulnwatch.labels" . | nindent 4 }}
+  annotations:
+    # The state DB remembers what was already reported: keep it when the
+    # release (Helm) or the Application (Argo CD) is deleted.
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+    {{- with .Values.persistence.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.accessModes | nindent 4 }}
+  {{- with .Values.persistence.storageClass }}
+  storageClassName: {{ if eq . "-" }}""{{ else }}{{ . | quote }}{{ end }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+{{- end }}
+{{- if .Values.news.enabled }}
+{{- if not .Values.persistence.enabled }}
+{{- fail "news.enabled needs persistence.enabled: without a volume every check is a first read and nothing is ever posted" }}
+{{- end }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "vulnwatch.newsClaimName" . }}
+  labels:
+    {{- include "vulnwatch.labels" . | nindent 4 }}
+  annotations:
+    # What vulnwatch news already posted: keep it, or every item is posted again.
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+    {{- with .Values.persistence.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.accessModes | nindent 4 }}
+  {{- with .Values.persistence.storageClass }}
+  storageClassName: {{ if eq . "-" }}""{{ else }}{{ . | quote }}{{ end }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.news.persistence.size }}
+{{- end }}

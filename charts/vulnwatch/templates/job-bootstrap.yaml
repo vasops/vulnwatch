@@ -1,0 +1,37 @@
+{{- if .Values.bootstrap.enabled }}
+# First run after install: checks every product against its full advisory
+# history (no Claude, nothing reported as new); what affects us is listed
+# under Still open.
+# --skip-if-initialized makes it a no-op once the state exists, so it is safe
+# as a hook that runs on every upgrade or every Argo CD sync (Argo CD maps
+# Helm post-install hooks to PostSync, which runs on each sync).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "vulnwatch.fullname" . }}-bootstrap
+  labels:
+    {{- include "vulnwatch.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: {{ .Values.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "vulnwatch.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- $args := list "bootstrap" "--skip-if-initialized" "--output" (join "," .Values.bootstrap.outputs) "--log-format" (.Values.run.logFormat | default "json") "--log-level" .Values.run.logLevel }}
+      {{- include "vulnwatch.podSpec" (dict "ctx" . "args" $args) | nindent 6 }}
+{{- end }}

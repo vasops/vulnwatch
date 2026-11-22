@@ -1,0 +1,26 @@
+<rss version="2.0">
+    <channel>
+        <title>Latest publications of type Security Advisories</title>
+        <link>https://cert.europa.eu/publications/security-advisories/</link>
+        <description>RSS feed for the latest 10 publications of type Security Advisories.</description>
+        <item>
+            <title>2026-021: High Severity Vulnerability in Java SE and OpenJDK</title>
+            <link>
+                https://cert.europa.eu/publications/security-advisories/2026-021/
+            </link>
+            <description>On 17 November 2026, Oracle and the OpenJDK project released fixes for CVE-2026-114938, a high severity vulnerability in OpenJDK which could lead, under certain circumstances, in unauthenticated Remote Code Execution (RCE).&lt;br&gt;
+CERT-EU recommends updating vulnerable version of OpenJDK, prioritising internet facing applications.&lt;br&gt;
+</description>
+            <pubDate>Wed, 18 Nov 2026 10:11:05 CET</pubDate>
+            <guid>security-advisories-10958</guid>
+        </item><item>
+            <title>2026-020: Critical Vulnerabilities in Citrix NetScaler ADC and NetScaler Gateway</title>
+            <link>
+                https://cert.europa.eu/publications/security-advisories/2026-020/
+            </link>
+            <description>Citrix released fixes for critical vulnerabilities in NetScaler ADC and NetScaler Gateway.</description>
+            <pubDate>Thu, 12 Nov 2026 18:20:53 CET</pubDate>
+            <guid>security-advisories-10951</guid>
+        </item>
+    </channel>
+</rss>

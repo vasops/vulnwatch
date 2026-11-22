@@ -1,0 +1,22 @@
+{{- if .Values.metrics.dashboard.enabled }}
+# Picked up by the Grafana dashboard sidecar (kube-prometheus-stack and
+# victoria-metrics-k8s-stack both watch the grafana_dashboard label).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vulnwatch.fullname" . }}-dashboard
+  namespace: {{ .Values.metrics.dashboard.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "vulnwatch.labels" . | nindent 4 }}
+    {{- toYaml .Values.metrics.dashboard.labels | nindent 4 }}
+  {{- with .Values.metrics.dashboard.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  # vulnwatch · tenant (uid vulnwatch) and vulnwatch · overview (all tenants).
+  vulnwatch.json: |-
+    {{- .Files.Get "dashboards/vulnwatch.json" | nindent 4 }}
+  vulnwatch-overview.json: |-
+    {{- .Files.Get "dashboards/vulnwatch-overview.json" | nindent 4 }}
+{{- end }}

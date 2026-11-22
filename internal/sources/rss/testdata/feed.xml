@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Security advisories</title>
+    <link>https://vendor.example/security</link>
+    <description>Test feed</description>
+    <item>
+      <title>Core - Critical - Access bypass - SA-CORE-2026-004</title>
+      <link>https://vendor.example/sa-core-2026-004</link>
+      <description>&lt;p&gt;CVE: CVE-2026-1111. Versions &amp;lt; 10.4.9 are affected.&lt;/p&gt;</description>
+      <pubDate>Wed, 07 Oct 2026 17:00:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Security release 18.4.2</title>
+      <link>https://vendor.example/releases/18-4-2</link>
+      <description>Fixes CVE-2026-2001, CVE-2026-2002 and CVE-2026-2003.</description>
+      <pubDate>Tue, 06 Oct 2026 10:00:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Old advisory</title>
+      <link>https://vendor.example/old</link>
+      <description>CVE-2020-0001</description>
+      <pubDate>Mon, 01 Jun 2020 10:00:00 +0000</pubDate>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,417 @@
+name: ci
+
+# Pull requests and main run every check; main also builds and scans the
+# image without pushing it. Only a vX.Y.Z tag publishes: image, chart,
+# signatures and the GitHub release with the binaries.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Builds never change go.mod/go.sum; module checksums stay verified (GOSUMDB on).
+  GOFLAGS: -mod=readonly
+  IMAGE: ghcr.io/vasops/vulnwatch
+  CHART_REGISTRY: oci://ghcr.io/vasops/charts
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - run: make lint
+
+  lint-chart:
+    runs-on: ubuntu-24.04
+    container: alpine/helm:3.22.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Chart appVersion matches version/version.go
+        run: |
+          FILE_VERSION=$(sed -n 's/^[[:space:]]*Version *= *"\(.*\)"/\1/p' version/version.go)
+          grep -q "^appVersion: \"${FILE_VERSION#v}\"$" charts/vulnwatch/Chart.yaml \
+            || { echo "Chart.yaml appVersion does not match version/version.go ($FILE_VERSION)"; exit 1; }
+      # The chart ships copies of defaults/config.yaml and defaults/sources.yaml.
+      - name: Chart copies of the defaults are in sync
+        run: |
+          diff -q defaults/config.yaml charts/vulnwatch/files/config.yaml
+          diff -q defaults/sources.yaml charts/vulnwatch/files/sources.yaml
+      - name: Lint and render
+        run: |
+          helm lint charts/vulnwatch -f charts/vulnwatch/ci/full-values.yaml
+          helm lint charts/vulnwatch -f charts/vulnwatch/ci/existing-stack-values.yaml
+          helm template ci charts/vulnwatch -f charts/vulnwatch/ci/full-values.yaml > /dev/null
+          helm template ci charts/vulnwatch -f charts/vulnwatch/ci/existing-stack-values.yaml > /dev/null
+          helm lint charts/vulnwatch -f charts/vulnwatch/ci/cilium-values.yaml
+          sh charts/vulnwatch/ci/check-cilium-egress.sh
+
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - run: go mod verify
+      - run: go test -race -coverprofile=coverage.out ./...
+      - run: go tool cover -func=coverage.out | tail -1
+
+  # Landlock denials (make landlock-selftest without Docker): the test
+  # restricts its own process, so it runs alone and uncached. Not blocking
+  # until a run shows the runner's kernel and seccomp profile allow Landlock
+  # (it fails with ABI 0 otherwise); then drop continue-on-error.
+  test-landlock:
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    env:
+      VULNWATCH_LANDLOCK_SELFTEST: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - run: go test -count=1 -v -run '^TestEnforced$' ./internal/sandbox
+
+  # Known vulnerabilities in code vulnwatch actually calls. Blocking; the
+  # scheduled workflow runs it too: new advisories appear without code changes.
+  govulncheck:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - run: make vulncheck
+
+  # Fails when the binary gains a capability (exec, network, files, unsafe, ...)
+  # docs/capslock-baseline.json doesn't have. After review: make capslock-baseline.
+  capslock:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - run: make capslock
+
+  trivy:
+    runs-on: ubuntu-24.04
+    container: aquasec/trivy:0.76.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: trivy fs --exit-code 0 --severity HIGH,CRITICAL --format table .
+      - run: trivy fs --exit-code 0 --format template --template "@trivy.tpl" --output trivy-report.html .
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: trivy-report
+          path: trivy-report.html
+      # A warning, not a gate: the pushed image is the one that blocks (scan-image).
+      - name: HIGH/CRITICAL with a fix
+        continue-on-error: true
+        run: trivy fs --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --quiet .
+
+  # ---------------------------------------------------------------------------
+  # Everything below publishes, so it only runs for pushes to this repository
+  # (never for pull requests or forks).
+  # ---------------------------------------------------------------------------
+
+  # The version lives in version/version.go. main builds are <version>-dev.<sha>
+  # (<version>.<sha> when the file already says -dev); a vX.Y.Z tag must match
+  # the file (bump the file first, then tag).
+  version:
+    if: github.event_name == 'push' && github.repository == 'vasops/vulnwatch'
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: version
+        run: |
+          FILE_VERSION=$(sed -n 's/^[[:space:]]*Version *= *"\(.*\)"/\1/p' version/version.go)
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            if [ "$GITHUB_REF_NAME" != "$FILE_VERSION" ]; then
+              echo "tag $GITHUB_REF_NAME does not match version/version.go ($FILE_VERSION)"; exit 1
+            fi
+            VERSION="$GITHUB_REF_NAME"
+          else
+            case "$FILE_VERSION" in
+              *-dev) VERSION="$FILE_VERSION.${GITHUB_SHA::8}" ;;
+              *) VERSION="$FILE_VERSION-dev.${GITHUB_SHA::8}" ;;
+            esac
+          fi
+          echo "version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  # CLI binaries for laptops (<version>-dev.<sha> on main, vX.Y.Z on tags).
+  binaries:
+    needs: [version]
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          PKG=github.com/vasops/vulnwatch/version
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags="-s -w -X $PKG.Version=$VERSION -X $PKG.Commit=${GITHUB_SHA::8} -X $PKG.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o "dist/vulnwatch_${VERSION}_${GOOS}_${GOARCH}" ./cmd/vulnwatch
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vulnwatch_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: dist/vulnwatch_*
+          if-no-files-found: error
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Container image, ghcr.io/vasops/vulnwatch.
+  #
+  # main:  built and handed to scan-image as an artifact, never pushed
+  # vX.Y.Z tags: pushed as X.Y.Z (what the chart's appVersion points to) and
+  # vX.Y.Z; no latest, deployments pin a version or digest
+  #
+  # Built only after every lint, test and security job has passed.
+  # ---------------------------------------------------------------------------
+  image:
+    needs: [version, lint, lint-chart, test, govulncheck, capslock, trivy]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          docker build --platform linux/amd64 \
+            --build-arg VERSION="$VERSION" --build-arg COMMIT="${GITHUB_SHA::8}" \
+            --build-arg DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t "$IMAGE:build" .
+      # main: the image goes to scan-image as a file, not to the registry.
+      - name: Save the image for the scan
+        if: github.ref_type != 'tag'
+        run: docker save "$IMAGE:build" -o image.tar
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: github.ref_type != 'tag'
+        with:
+          name: image
+          path: image.tar
+          if-no-files-found: error
+          retention-days: 1
+      - name: Log in to ghcr.io
+        if: github.ref_type == 'tag'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Push
+        id: push
+        if: github.ref_type == 'tag'
+        run: |
+          for t in "${GITHUB_REF_NAME#v}" "$GITHUB_REF_NAME"; do
+            docker tag "$IMAGE:build" "$IMAGE:$t"
+            docker push "$IMAGE:$t"
+          done
+          # Every tag is the same image; later jobs scan and sign it by digest.
+          DIGEST=$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$IMAGE:build" | sed -n "s|^$IMAGE@||p" | head -n 1)
+          test -n "$DIGEST" || { echo "no digest for $IMAGE after the push"; exit 1; }
+          echo "image digest $DIGEST"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+  # CycloneDX SBOM of the pushed image (packages and Go modules).
+  sbom-image:
+    needs: [image]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    container: aquasec/trivy:0.76.1
+    permissions:
+      contents: read
+      packages: read
+    env:
+      TRIVY_USERNAME: ${{ github.actor }}
+      TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+      DIGEST: ${{ needs.image.outputs.digest }}
+    steps:
+      - run: trivy image --format cyclonedx --output sbom.cdx.json "$IMAGE@$DIGEST"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 90
+
+  # The image, base and Go standard library included (the trivy fs scan sees
+  # only go.mod): fails on HIGH/CRITICAL vulnerabilities with a fix. On main
+  # it reads the image file from the image job, on a tag the pushed image.
+  # release-chart needs it, so a vulnerable image never gets a chart.
+  scan-image:
+    needs: [image]
+    runs-on: ubuntu-24.04
+    container: aquasec/trivy:0.76.1
+    permissions:
+      contents: read
+      packages: read
+    env:
+      TRIVY_USERNAME: ${{ github.actor }}
+      TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+      DIGEST: ${{ needs.image.outputs.digest }}
+    steps:
+      - name: Scan the pushed image
+        if: github.ref_type == 'tag'
+        run: trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "$IMAGE@$DIGEST"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: github.ref_type != 'tag'
+        with:
+          name: image
+      - name: Scan the built image
+        if: github.ref_type != 'tag'
+        run: trivy image --input image.tar --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed
+
+  # Keyless cosign signature and SBOM attestation on the image digest, for
+  # admission policies (Kyverno, policy-controller). The certificate names
+  # this workflow and the tag; see docs/security.md for cosign verify.
+  sign-image:
+    needs: [image, sbom-image, scan-image]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    env:
+      DIGEST: ${{ needs.image.outputs.digest }}
+    steps:
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sbom
+      - name: Log in to ghcr.io
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | cosign login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - run: cosign sign --yes "$IMAGE@$DIGEST"
+      - run: cosign attest --yes --type cyclonedx --predicate sbom.cdx.json "$IMAGE@$DIGEST"
+
+  # Chart to ghcr.io/vasops/charts (OCI). Chart version and appVersion follow
+  # the tag, so the chart's default image tag is the X.Y.Z image pushed above.
+  release-chart:
+    needs: [image, scan-image, lint-chart]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    container: alpine/helm:3.22.1
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Package and push
+        id: push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          echo "$GITHUB_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          helm package ./charts/vulnwatch --version "${GITHUB_REF_NAME#v}" --app-version "${GITHUB_REF_NAME#v}"
+          helm push vulnwatch-*.tgz "$CHART_REGISTRY" 2>&1 | tee push.log
+          DIGEST=$(sed -n 's/^Digest: //p' push.log)
+          test -n "$DIGEST" || { echo "no digest in the helm push output"; exit 1; }
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+  # Keyless cosign signature on the chart's OCI digest (see sign-image).
+  sign-chart:
+    needs: [release-chart]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    env:
+      DIGEST: ${{ needs.release-chart.outputs.digest }}
+    steps:
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - name: Log in to ghcr.io
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | cosign login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - run: cosign sign --yes "${CHART_REGISTRY#oci://}/vulnwatch@$DIGEST"
+
+  # GitHub release with the binaries, the image SBOM and their checksums,
+  # once the image and the chart are published and signed. checksums.txt gets
+  # a keyless cosign signature, which covers every file it lists.
+  release:
+    needs: [binaries, sbom-image, sign-image, sign-chart]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: vulnwatch_*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sbom
+          path: dist
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd dist
+          mv sbom.cdx.json "vulnwatch_${GITHUB_REF_NAME}_image.cdx.json"
+          sha256sum vulnwatch_* > checksums.txt
+          cosign sign-blob --yes --bundle checksums.txt.sigstore.json checksums.txt
+          gh release create "$GITHUB_REF_NAME" ./* --title "$GITHUB_REF_NAME" --generate-notes --verify-tag

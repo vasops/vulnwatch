@@ -1,0 +1,555 @@
+{
+  "vulns": [
+    {
+      "id": "GHSA-2hj5-g64g-fp6p",
+      "summary": "Argo CD allows cross-site scripting on repositories page",
+      "details": "### Impact\nThis vulnerability allows an attacker to perform arbitrary actions on behalf of the victim via the API, such as creating, modifying, and deleting Kubernetes resources. Due to the improper filtering of URL protocols in the repository page, an attacker can achieve cross-site scripting with ...",
+      "aliases": [
+        "BIT-argo-cd-2025-47933",
+        "CVE-2025-47933",
+        "GO-2025-3720"
+      ],
+      "modified": "2026-09-10T03:49:36.554224237Z",
+      "published": "2025-05-28T17:36:32Z",
+      "database_specific": {
+        "cwe_ids": [
+          "CWE-79"
+        ],
+        "severity": "CRITICAL",
+        "github_reviewed": true,
+        "github_reviewed_at": "2025-05-28T17:36:32Z",
+        "nvd_published_at": "2025-05-29T20:15:27Z"
+      },
+      "references": [
+        {
+          "type": "WEB",
+          "url": "https://github.com/argoproj/argo-cd/security/advisories/GHSA-2hj5-g64g-fp6p"
+        },
+        {
+          "type": "ADVISORY",
+          "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-47933"
+        },
+        {
+          "type": "WEB",
+          "url": "https://github.com/argoproj/argo-cd/commit/a5b4041a79c54bc7b3d090805d070bcdb9a9e4d1"
+        },
+        {
+          "type": "PACKAGE",
+          "url": "https://github.com/argoproj/argo-cd"
+        }
+      ],
+      "affected": [
+        {
+          "package": {
+            "name": "github.com/argoproj/argo-cd",
+            "ecosystem": "Go",
+            "purl": "pkg:golang/github.com/argoproj/argo-cd"
+          },
+          "ranges": [
+            {
+              "type": "SEMVER",
+              "events": [
+                {
+                  "introduced": "1.2.0-rc1"
+                },
+                {
+                  "last_affected": "1.8.7"
+                }
+              ]
+            }
+          ],
+          "database_specific": {
+            "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2025/05/GHSA-2hj5-g64g-fp6p/GHSA-2hj5-g64g-fp6p.json"
+          }
+        },
+        {
+          "package": {
+            "name": "github.com/argoproj/argo-cd/v2",
+            "ecosystem": "Go",
+            "purl": "pkg:golang/github.com/argoproj/argo-cd/v2"
+          },
+          "ranges": [
+            {
+              "type": "SEMVER",
+              "events": [
+                {
+                  "introduced": "2.0.0-rc3"
+                },
+                {
+                  "fixed": "2.13.8"
+                }
+              ]
+            }
+          ],
+          "database_specific": {
+            "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2025/05/GHSA-2hj5-g64g-fp6p/GHSA-2hj5-g64g-fp6p.json"
+          }
+        },
+        {
+          "package": {
+            "name": "github.com/argoproj/argo-cd/v2",
+            "ecosystem": "Go",
+            "purl": "pkg:golang/github.com/argoproj/argo-cd/v2"
+          },
+          "ranges": [
+            {
+              "type": "SEMVER",
+              "events": [
+                {
+                  "introduced": "2.14.0-rc1"
+                },
+                {
+                  "fixed": "2.14.13"
+                }
+              ]
+            }
+          ],
+          "database_specific": {
+            "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2025/05/GHSA-2hj5-g64g-fp6p/GHSA-2hj5-g64g-fp6p.json"
+          }
+        },
+        {
+          "package": {
+            "name": "github.com/argoproj/argo-cd/v3",
+            "ecosystem": "Go",
+            "purl": "pkg:golang/github.com/argoproj/argo-cd/v3"
+          },
+          "ranges": [
+            {
+              "type": "SEMVER",
+              "events": [
+                {
+                  "introduced": "0"
+                },
+                {
+                  "fixed": "3.0.4"
+                }
+              ]
+            }
+          ],
+          "database_specific": {
+            "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2025/05/GHSA-2hj5-g64g-fp6p/GHSA-2hj5-g64g-fp6p.json"
+          }
+        }
+      ],
+      "schema_version": "1.9.0",
+      "severity": [
+        {
+          "type": "CVSS_V3",
+          "score": "CVSS:3.1/AV:N/AC:L/PR:L/UI:R/S:C/C:H/I:H/A:H"
+        }
+      ]
+    },
+    {
+      "id": "GHSA-3cv6-jpf6-8222",
+      "summary": "LiteLLM: Authenticated SSRF and provider-credential exfiltration via unvalidated request-body routing parameters",
+      "details": "### Impact\n\nAny authenticated LiteLLM proxy user could redirect an outbound provider call to a destination they control and cause the proxy to send its own configured provider credentials to that destination. The proxy's request-body validation was a denylist that did not cover every sensitive param...",
+      "aliases": [
+        "CVE-2026-84377",
+        "PYSEC-2026-4066"
+      ],
+      "modified": "2026-10-01T17:55:39.952052915Z",
+      "published": "2026-09-30T21:11:25Z",
+      "database_specific": {
+        "severity": "MODERATE",
+        "github_reviewed": true,
+        "github_reviewed_at": "2026-09-30T21:11:25Z",
+        "nvd_published_at": "2026-09-02T18:21:28Z",
+        "cwe_ids": [
+          "CWE-918"
+        ]
+      },
+      "references": [
+        {
+          "type": "WEB",
+          "url": "https://github.com/BerriAI/litellm/security/advisories/GHSA-3cv6-jpf6-8222"
+        },
+        {
+          "type": "ADVISORY",
+          "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-84377"
+        },
+        {
+          "type": "WEB",
+          "url": "https://github.com/BerriAI/litellm/pull/36011"
+        },
+        {
+          "type": "WEB",
+          "url": "https://github.com/BerriAI/litellm/pull/36314"
+        },
+        {
+          "type": "WEB",
+          "url": "https://github.com/BerriAI/litellm/pull/36494"
+        },
+        {
+          "type": "WEB",
+          "url": "https://github.com/BerriAI/litellm/commit/473f72e63a9777d793fbbf57194d8ec4fb97bc1b"
+        },
+        {
+          "type": "WEB",
+          "url": "https://github.com/BerriAI/litellm/commit/820f247a6abba55cd87d130bef7bba7be3b29d37"
+        },
+        {
+          "type": "WEB",
+          "url": "https://github.com/BerriAI/litellm/commit/c898d341c02299cf2506d0d8e84cc67953043593"
+        },
+        {
+          "type": "PACKAGE",
+          "url": "https://github.com/BerriAI/litellm"
+        }
+      ],
+      "affected": [
+        {
+          "package": {
+            "name": "litellm",
+            "ecosystem": "PyPI",
+            "purl": "pkg:pypi/litellm"
+          },
+          "ranges": [
+            {
+              "type": "ECOSYSTEM",
+              "events": [
+                {
+                  "introduced": "0"
+                },
+                {
+                  "fixed": "1.88.6"
+                }
+              ]
+            }
+          ],
+          "versions": [
+            "0.1.0",
+            "0.1.1",
+            "0.1.2",
+            "0.1.201",
+            "0.1.202",
+            "0.1.203",
+            "...TRIMMED"
+          ],
+          "database_specific": {
+            "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-3cv6-jpf6-8222/GHSA-3cv6-jpf6-8222.json"
+          }
+        },
+        {
+          "package": {
+            "name": "litellm",
+            "ecosystem": "PyPI",
+            "purl": "pkg:pypi/litellm"
+          },
+          "ranges": [
+            {
+              "type": "ECOSYSTEM",
+              "events": [
+                {
+                  "introduced": "1.89.0"
+                },
+                {
+                  "fixed": "1.89.7"
+                }
+              ]
+            }
+          ],
+          "versions": [
+            "1.89.0",
+            "1.89.1",
+            "1.89.2",
+            "1.89.3",
+            "1.89.4",
+            "1.89.5",
+            "...TRIMMED"
+          ],
+          "database_specific": {
+            "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-3cv6-jpf6-8222/GHSA-3cv6-jpf6-8222.json"
+          }
+        },
+        {
+          "package": {
+            "name": "litellm",
+            "ecosystem": "PyPI",
+            "purl": "pkg:pypi/litellm"
+          },
+          "ranges": [
+            {
+              "type": "ECOSYSTEM",
+              "events": [
+                {
+                  "introduced": "1.90.0"
+                },
+                {
+                  "fixed": "1.90.7"
+                }
+              ]
+            }
+          ],
+          "versions": [
+            "1.90.0",
+            "1.90.1",
+            "1.90.2",
+            "1.90.3",
+            "1.90.4",
+            "1.90.5",
+            "...TRIMMED"
+          ],
+          "database_specific": {
+            "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-3cv6-jpf6-8222/GHSA-3cv6-jpf6-8222.json"
+          }
+        },
+        {
+          "package": {
+            "name": "litellm",
+            "ecosystem": "PyPI",
+            "purl": "pkg:pypi/litellm"
+          },
+          "ranges": [
+            {
+              "type": "ECOSYSTEM",
+              "events": [
+                {
+                  "introduced": "1.91.0"
+                },
+                {
+                  "fixed": "1.91.5"
+                }
+              ]
+            }
+          ],
+          "versions": [
+            "1.91.0",
+            "1.91.1",
+            "1.91.2",
+            "1.91.3",
+            "1.91.4"
+          ],
+          "database_specific": {
+            "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-3cv6-jpf6-8222/GHSA-3cv6-jpf6-8222.json"
+          }
+        },
+        {
+          "package": {
+            "name": "litellm",
+            "ecosystem": "PyPI",
+            "purl": "pkg:pypi/litellm"
+          },
+          "ranges": [
+            {
+              "type": "ECOSYSTEM",
+              "events": [
+                {
+                  "introduced": "1.92.0"
+                },
+                {
+                  "fixed": "1.92.2"
+                }
+              ]
+            }
+          ],
+          "versions": [
+            "1.92.0",
+            "1.92.1"
+          ],
+          "database_specific": {
+            "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-3cv6-jpf6-8222/GHSA-3cv6-jpf6-8222.json"
+          }
+        },
+        {
+          "package": {
+            "name": "litellm",
+            "ecosystem": "PyPI",
+            "purl": "pkg:pypi/litellm"
+          },
+          "ranges": [
+            {
+              "type": "ECOSYSTEM",
+              "events": [
+                {
+                  "introduced": "1.93.0"
+                },
+                {
+                  "fixed": "1.93.2"
+                }
+              ]
+            }
+          ],
+          "versions": [
+            "1.93.0",
+            "1.93.1"
+          ],
+          "database_specific": {
+            "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-3cv6-jpf6-8222/GHSA-3cv6-jpf6-8222.json"
+          }
+        },
+        {
+          "package": {
+            "name": "litellm",
+            "ecosystem": "PyPI",
+            "purl": "pkg:pypi/litellm"
+          },
+          "ranges": [
+            {
+              "type": "ECOSYSTEM",
+              "events": [
+                {
+                  "introduced": "1.94.0"
+                },
+                {
+                  "fixed": "1.94.3"
+                }
+              ]
+            }
+          ],
+          "versions": [
+            "1.94.0",
+            "1.94.1",
+            "1.94.2"
+          ],
+          "database_specific": {
+            "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-3cv6-jpf6-8222/GHSA-3cv6-jpf6-8222.json"
+          }
+        },
+        {
+          "package": {
+            "name": "litellm",
+            "ecosystem": "PyPI",
+            "purl": "pkg:pypi/litellm"
+          },
+          "ranges": [
+            {
+              "type": "ECOSYSTEM",
+              "events": [
+                {
+                  "introduced": "1.95.0"
+                },
+                {
+                  "fixed": "1.95.1"
+                }
+              ]
+            }
+          ],
+          "versions": [
+            "1.95.0"
+          ],
+          "database_specific": {
+            "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-3cv6-jpf6-8222/GHSA-3cv6-jpf6-8222.json"
+          }
+        },
+        {
+          "package": {
+            "name": "litellm",
+            "ecosystem": "PyPI",
+            "purl": "pkg:pypi/litellm"
+          },
+          "ranges": [
+            {
+              "type": "ECOSYSTEM",
+              "events": [
+                {
+                  "introduced": "1.96.0"
+                },
+                {
+                  "fixed": "1.96.2"
+                }
+              ]
+            }
+          ],
+          "versions": [
+            "1.96.0"
+          ],
+          "database_specific": {
+            "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-3cv6-jpf6-8222/GHSA-3cv6-jpf6-8222.json"
+          }
+        }
+      ],
+      "schema_version": "1.9.0",
+      "severity": [
+        {
+          "type": "CVSS_V3",
+          "score": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N"
+        }
+      ]
+    },
+    {
+      "id": "GHSA-3xr8-qfvj-9p9j",
+      "summary": "Arbitrary file deletion in litellm",
+      "details": "BerriAI's litellm, in its latest version, is vulnerable to arbitrary file deletion due to improper input validation on the `/audio/transcriptions` endpoint. An attacker can exploit this vulnerability by sending a specially crafted request that includes a file path to the server, which then deletes t...",
+      "aliases": [
+        "CVE-2024-4888",
+        "PYSEC-2026-1540"
+      ],
+      "modified": "2026-09-10T03:49:18.835971080Z",
+      "published": "2024-06-06T21:30:37Z",
+      "database_specific": {
+        "github_reviewed": true,
+        "github_reviewed_at": "2024-06-06T22:55:45Z",
+        "nvd_published_at": "2024-06-06T19:16:03Z",
+        "cwe_ids": [
+          "CWE-20",
+          "CWE-862"
+        ],
+        "severity": "HIGH"
+      },
+      "references": [
+        {
+          "type": "ADVISORY",
+          "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-4888"
+        },
+        {
+          "type": "WEB",
+          "url": "https://github.com/BerriAI/litellm/pull/3193"
+        },
+        {
+          "type": "PACKAGE",
+          "url": "https://github.com/BerriAI/litellm"
+        },
+        {
+          "type": "WEB",
+          "url": "https://huntr.com/bounties/48461d89-cf13-4ad3-a43e-0d37da08fc6c"
+        }
+      ],
+      "affected": [
+        {
+          "package": {
+            "name": "litellm",
+            "ecosystem": "PyPI",
+            "purl": "pkg:pypi/litellm"
+          },
+          "ranges": [
+            {
+              "type": "ECOSYSTEM",
+              "events": [
+                {
+                  "introduced": "0"
+                },
+                {
+                  "fixed": "1.35.36"
+                }
+              ]
+            }
+          ],
+          "versions": [
+            "0.1.0",
+            "0.1.1",
+            "0.1.2",
+            "0.1.201",
+            "0.1.202",
+            "0.1.203",
+            "...TRIMMED"
+          ],
+          "database_specific": {
+            "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2024/06/GHSA-3xr8-qfvj-9p9j/GHSA-3xr8-qfvj-9p9j.json"
+          }
+        }
+      ],
+      "schema_version": "1.9.0",
+      "severity": [
+        {
+          "type": "CVSS_V3",
+          "score": "CVSS:3.0/AV:N/AC:L/PR:H/UI:N/S:U/C:N/I:H/A:H"
+        },
+        {
+          "type": "CVSS_V4",
+          "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:N/VC:N/VI:H/VA:H/SC:N/SI:N/SA:N"
+        }
+      ]
+    }
+  ]
+}

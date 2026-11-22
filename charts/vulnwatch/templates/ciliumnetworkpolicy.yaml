@@ -1,0 +1,81 @@
+{{- if .Values.networkPolicy.cilium.enabled }}
+{{- /* Hosts: the configured list, extras, and every Helm chart repository in the stack (tenants included). */}}
+{{- $hosts := concat .Values.networkPolicy.cilium.fqdns .Values.networkPolicy.cilium.extraFQDNs }}
+{{- $stack := .Values.stack | default dict }}
+{{- $helm := $stack.helm | default list }}
+{{- range $t := ($stack.tenants | default dict) }}
+{{- range $e := ($t.environments | default dict) }}
+{{- $helm = concat $helm ($e.helm | default list) }}
+{{- end }}
+{{- end }}
+{{- range $helm }}
+{{- with (urlParse .repo).host }}
+{{- $hosts = append $hosts (regexReplaceAll ":[0-9]+$" . "") }}
+{{- end }}
+{{- end }}
+# Egress by host name: DNS through Cilium's proxy (it learns the addresses
+# from the answers), HTTPS only to the hosts below, plus the Pushgateway and,
+# with trivy.enabled, the Kubernetes API. Everything else is denied.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "vulnwatch.fullname" . }}
+  labels:
+    {{- include "vulnwatch.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- include "vulnwatch.selectorLabels" . | nindent 6 }}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            {{- toYaml .Values.networkPolicy.cilium.dnsSelector | nindent 12 }}
+      toPorts:
+        - ports:
+            - { port: "53", protocol: ANY }
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        {{- range (uniq $hosts) }}
+        {{- if contains "*" . }}
+        - matchPattern: {{ . | quote }}
+        {{- else }}
+        - matchName: {{ . | quote }}
+        {{- end }}
+        {{- end }}
+      toPorts:
+        - ports:
+            - { port: "443", protocol: TCP }
+    {{- if .Values.metrics.pushgateway.url }}
+    {{- $pgNamespace := .Values.networkPolicy.pushgatewayNamespace }}
+    {{- $pgLabels := .Values.networkPolicy.pushgatewayPodLabels }}
+    {{- if or $pgNamespace $pgLabels }}
+    - toEndpoints:
+        - matchLabels:
+            {{- with $pgNamespace }}
+            k8s:io.kubernetes.pod.namespace: {{ . | quote }}
+            {{- end }}
+            {{- range $k, $v := $pgLabels }}
+            {{ $k }}: {{ $v | quote }}
+            {{- end }}
+          {{- if not $pgNamespace }}
+          matchExpressions:
+            - { key: k8s:io.kubernetes.pod.namespace, operator: Exists }
+          {{- end }}
+    {{- else }}
+    - toEntities: [cluster]
+    {{- end }}
+      toPorts:
+        - ports:
+            - { port: {{ .Values.networkPolicy.pushgatewayPort | quote }}, protocol: TCP }
+    {{- end }}
+    {{- if .Values.trivy.enabled }}
+    - toEntities: [kube-apiserver]
+      toPorts:
+        - ports:
+            {{- range .Values.networkPolicy.apiServerPorts }}
+            - { port: {{ . | quote }}, protocol: TCP }
+            {{- end }}
+    {{- end }}
+{{- end }}

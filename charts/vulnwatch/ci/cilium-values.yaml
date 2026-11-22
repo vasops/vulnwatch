@@ -1,0 +1,18 @@
+# Cilium egress with every rule that opens ports: make chart-lint checks that
+# the plain NetworkPolicy then has no rule without a destination.
+stack:
+  helm:
+    - { repo: https://argoproj.github.io/argo-helm, chart: argo-cd, version: 10.9.2 }
+  products:
+    gitlab-ce: { version: "19.5.1" }
+trivy:
+  enabled: true
+metrics:
+  pushgateway:
+    url: http://prometheus-pushgateway.monitoring:9091
+networkPolicy:
+  enabled: true
+  pushgatewayNamespace: monitoring
+  pushgatewayPodLabels: { app.kubernetes.io/name: prometheus-pushgateway }
+  cilium:
+    enabled: true

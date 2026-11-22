@@ -1,0 +1,70 @@
+version: "2"
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - depguard
+    - forbidigo
+    - gosec
+    - errorlint
+    - gocritic
+    - misspell
+    - noctx
+    - unconvert
+    - unparam
+  settings:
+    # Packages vulnwatch must never use: they break memory safety, run
+    # programs, skip HTML escaping, give guessable numbers or open debug
+    # endpoints.
+    depguard:
+      rules:
+        banned:
+          deny:
+            - pkg: unsafe
+              desc: keeps Go's memory-safety guarantees
+            - pkg: os/exec
+              desc: vulnwatch runs no programs
+            - pkg: text/template
+              desc: use html/template, which escapes
+            - pkg: math/rand
+              desc: use crypto/rand
+            - pkg: math/rand/v2
+              desc: use crypto/rand
+            - pkg: net/http/pprof
+              desc: registers debug endpoints on http.DefaultServeMux
+            - pkg: expvar
+              desc: registers a debug endpoint on http.DefaultServeMux
+    # The standard library's defaults that have no timeout or listen on
+    # the shared mux.
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^http\.DefaultServeMux$
+          msg: never use the shared mux (debug handlers register there)
+        - pattern: ^http\.(Handle|HandleFunc|ListenAndServe|ListenAndServeTLS|Serve)$
+          msg: vulnwatch serves nothing
+        - pattern: ^http\.(DefaultClient|Get|Head|Post|PostForm)$
+          msg: the default client has no timeout; use internal/httpx
+    gosec:
+      excludes:
+        - G104 # unhandled errors: errcheck covers them, with the same exclusions
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - os.Remove
+        - (*os.File).Close
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Tx).Rollback
+        - (*github.com/vasops/vulnwatch/internal/state.Store).Close
+        - (net/http.ResponseWriter).Write
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [errcheck, noctx, unparam, gosec]
+formatters:
+  enable:
+    - gofmt

@@ -1,0 +1,24 @@
+vulnwatch runs on schedule "{{ .Values.schedule }}"{{ with .Values.timeZone }} ({{ . }}){{ end }} as CronJob {{ include "vulnwatch.fullname" . }}.
+
+Run it now:
+  kubectl -n {{ .Release.Namespace }} create job --from=cronjob/{{ include "vulnwatch.fullname" . }} {{ include "vulnwatch.fullname" . }}-manual-$(date +%s)
+{{- if not (include "vulnwatch.secretName" .) }}
+
+WARNING: no Secret configured (secrets.existingSecret). Without GITHUB_TOKEN the
+GitHub API allows 60 requests/hour, and triage needs ANTHROPIC_API_KEY unless
+disabled with configOverride.triage.enabled=false.
+{{- end }}
+{{- if has "slack" .Values.run.outputs }}{{ if not .Values.env.SLACK_CHANNEL }}
+
+WARNING: the slack output needs env.SLACK_CHANNEL (and SLACK_BOT_TOKEN in the Secret).
+{{- end }}{{ end }}
+{{- if not .Values.persistence.enabled }}
+
+WARNING: persistence is disabled; every run starts with an empty state and
+reports everything in its window again.
+{{- end }}
+{{- if .Values.metrics.pushgateway.url }}
+
+Metrics are pushed to {{ .Values.metrics.pushgateway.url }} after every run; scrape
+the Pushgateway with honor_labels: true.
+{{- end }}

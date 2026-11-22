@@ -1,0 +1,74 @@
+# vulnwatch config file: HOW vulnwatch runs. Only `http`, `run`, `triage`,
+# `outputs` and `product_defaults` belong here. Where to look (sources,
+# catalog, helm_charts) is in sources.yaml; vulnwatch rejects a key that is
+# in the wrong file.
+#
+# Required input (--app-config / VULNWATCH_CONFIG, default ./config.yaml).
+# Nothing is built into the binary. Copy this file and adapt it. Like
+# --sources, --app-config can be repeated; later files are deep-merged on top.
+# Secrets never go here, only the NAME of the env var that holds them.
+
+version: 1
+
+http:
+  user_agent: "vulnwatch/{{version}} (+https://github.com/vasops/vulnwatch)"   # contact URL for API operators
+  timeout: 30s
+  retries: 3                    # connection errors, 429, 5xx and rate-limited 403s
+  retry_backoff: 2s             # doubles per retry, at most 8x; a server asking for longer fails the request
+  max_concurrency: 8
+  max_response_bytes: 67108864  # 64 MiB per response
+
+run:
+  deadline: 20m                 # global deadline for one run, all stages included
+  overlap: 24h                  # time window starts at last successful run minus this
+  retry_failed_after: 3m        # sources that failed are asked once more after this (NVD outages); 0 = never
+
+# ---------------------------------------------------------------------------
+# LLM triage defaults. Env vars override these values.
+# ---------------------------------------------------------------------------
+triage:
+  enabled: true
+  api_key_env: ANTHROPIC_API_KEY
+  model: claude-haiku-5-5       # env: CLAUDE_MODEL
+  effort: high                  # low|medium|high|xhigh|max; env: CLAUDE_EFFORT (empty: model default, medium on Haiku 5.5)
+  language: en                  # env: REPORT_LANGUAGE
+  max_findings: 50              # env: MAX_LLM_FINDINGS (cost guard per run)
+  batch_size: 10
+  base_url: https://api.anthropic.com
+  max_tokens: 16000             # includes thinking tokens; too low truncates a batch and falls back to rules
+  timeout: 120s                 # per API request
+
+# ---------------------------------------------------------------------------
+# Output settings. Secrets and channel IDs come from env vars only.
+# ---------------------------------------------------------------------------
+outputs:
+  slack:
+    base_url: https://slack.com/api/
+    token_env: SLACK_BOT_TOKEN
+    channel_env: SLACK_CHANNEL
+    alert_channel_env: SLACK_ALERT_CHANNEL
+    news_channel_env: SLACK_NEWS_CHANNEL   # vulnwatch news; unset: the channel_env channel
+    max_section_text: 3000
+    post_interval: 1100ms         # Slack allows roughly 1 message/second/channel
+    # Grafana dashboard linked from the run summary and every P1 alert.
+    # {from} and {to} become now-30d and now: the last 30 days up to the click.
+    # e.g. https://grafana.example.com/d/vulnwatch/vulnwatch?from={from}&to={to}
+    dashboard_url: ""
+
+# ---------------------------------------------------------------------------
+# Prometheus metrics. vulnwatch is a batch job, so it pushes its metrics to a
+# Pushgateway at the end of every run (dry runs excluded). The Pushgateway
+# must be scraped with honor_labels: true. Empty URL: no push.
+# ---------------------------------------------------------------------------
+metrics:
+  pushgateway_url: ""             # e.g. http://prometheus-pushgateway.monitoring:9091
+  job: vulnwatch
+  grouping: {}                    # extra grouping labels, e.g. {instance: prod}
+  timeout: 10s
+
+# Defaults applied to every product in stack.yaml unless overridden there.
+product_defaults:
+  min_cvss: 4.0                 # ignore findings below this unless KEV-listed
+  exposure: internal            # internet | internal
+  criticality: medium           # high | medium | low
+

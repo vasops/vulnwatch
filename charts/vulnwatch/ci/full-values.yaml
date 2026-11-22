@@ -1,0 +1,41 @@
+# Exercises every optional feature for `helm lint` / `helm template`.
+stack:
+  generated_at: "2026-11-01"
+  defaults: { exposure: internal }
+  helm:
+    - { repo: https://argoproj.github.io/argo-helm, chart: argo-cd, version: 10.9.2 }
+  products:
+    gitlab-ce: { version: "19.5.1", exposure: internet }
+run:
+  outputs: [stdout, html, json, slack]
+bootstrap:
+  enabled: true
+news:
+  enabled: true
+configOverride:
+  triage: { enabled: false }
+sourcesOverride:
+  catalog:
+    mariadb: { enabled: false }
+env:
+  SLACK_CHANNEL: C0123456789
+secrets:
+  existingSecret: vulnwatch-tokens
+image:
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+metrics:
+  pushgateway:
+    url: http://prometheus-pushgateway.monitoring:9091
+    grouping: { instance: prod }
+  dashboard:
+    enabled: true
+    annotations: { grafana_folder: Security }
+    url: "https://grafana.example.com/d/vulnwatch/vulnwatch?from={from}&to={to}"
+  prometheusRule:
+    enabled: true
+    labels: { release: kube-prometheus-stack }
+networkPolicy:
+  enabled: true
+  internetExcept: [10.0.0.0/8]
+persistence:
+  storageClass: longhorn
