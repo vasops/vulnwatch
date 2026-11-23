@@ -96,7 +96,11 @@ stack nested under `tenants.acme.environments.prod`.
   channel), with a dashboard link that selects the tenant. The local stack and
   tenants without channels use `SLACK_CHANNEL` / `SLACK_ALERT_CHANNEL`, which
   also get the run's warning count. Every channel is told when a source
-  failed (by name only).
+  failed (by name only). A finding that affects several of a channel's
+  environments is one entry in its summary, listing all of the channel's affected
+  environments with their versions, and one P1 card, listing only the
+  environments where the finding is P1. Each channel lists only its own
+  environments: acme's channel never shows globex.
 - **Trivy is local.** Image findings belong to the local stack only. A
   tenant's kernel is watched from its `os` section, like the local one.
 - **Compatible.** A stack.yaml without `tenants` is one tenant, `local/default`.

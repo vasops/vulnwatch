@@ -9,20 +9,41 @@ All outputs link each finding to its **NVD record** and **GitHub advisory**
 - **json:** the full report model.
 - **html:** one self-contained file, light/dark, mobile-friendly.
 - **slack:** short on purpose; details live in Grafana and the HTML/JSON report.
-  - **Run summary** to `SLACK_CHANNEL`: P1 count, new and open counts per
-    priority (open as on the dashboard: new plus still open), the new and
-    updated findings (most urgent first, up to 10 and as many as fit in
-    Slack's 3000 characters, the rest as "+N more") with product, version,
-    advisory link, why it was updated and the action, and a link to the
-    Grafana dashboard for this run (`outputs.slack.dashboard_url`,
-    `{from}`/`{to}` become `now-30d`/`now`). A finding in several tenant environments
-    is one line (`acme: prod, stage; beta: prod`). When a source failed, the
-    summary says the run is incomplete and names the source.
-  - **P1 alert** to `SLACK_ALERT_CHANNEL`: one card per P1 found in this run,
-    with a plain-language explanation, severity, fix (the version to upgrade
-    to first), exploitation (KEV and EPSS), whether our version is affected,
-    the action and the links. More than 5 P1s from full-history checks (a new
-    tenant, a lost state) share one card.
+  - **Run summary** to `SLACK_CHANNEL`: the P1 count, new and open counts
+    per priority (open as on the dashboard: new plus still open), the new
+    and updated findings, and a link to the Grafana dashboard for this run
+    (`outputs.slack.dashboard_url`, `{from}`/`{to}` become `now-30d`/`now`).
+    When a source failed, the summary says the run is incomplete and names
+    the source.
+    - **One entry per finding**, an advisory for a product, most urgent
+      first: the full title, one action, the advisory link, why it was
+      updated, and under it the tenant environments it affects with their
+      versions. Environments share a line when they have the same version and
+      the same priority; an environment where the finding has a lower
+      priority gets its own line, marked with that priority's emoji. The
+      action is the one most environments share. At most 10 findings are listed, then
+      `+N more on the dashboard`; environments that do not fit in a section
+      become `+N more environments`.
+    - **Counts** are findings, with the number of environments next to them
+      when it is larger: `N critical (P1) finding(s) in M environments`,
+      `New: N in M environments`. `Open` stays per environment, so it matches
+      the `findings_open` metric. Without tenants every count is as before.
+    ```
+    :red_circle: debian-13-kernel · CVE-2026-98432
+    ipv4: free inet_opt and ireq_opt after an RCU grace period
+          ↳ Upgrade the debian-13 kernel on all Kubernetes nodes to 6.12.113-1 or later.
+          • acme: dev; globex: test · `6.12.95`
+          • acme: prod · `6.12.95, 6.12.101`
+          • initech: prod · `6.12.62`
+    ```
+  - **P1 alert** to `SLACK_ALERT_CHANNEL`: one card per P1 finding found in
+    this run, not one per environment, with a plain-language explanation,
+    severity, fix (the version to upgrade to first), exploitation (KEV and
+    EPSS), the action and the links. With one environment the card says
+    whether our version is affected; with several it has an `Affected` list
+    of the environments where the finding is P1, with their versions. More
+    than 5 P1 findings from full-history checks (a new tenant, a lost state)
+    share one card, which groups environments the same way.
   - **Tenants** with their own `slack.channel` get their own summary and
     alerts (see [Tenants](tenants.md#tenants)).
   - **At-least-once:** a P1 is alerted when new or materially changed. A
@@ -62,8 +83,9 @@ All outputs link each finding to its **NVD record** and **GitHub advisory**
     `failed_sources` are omitted when empty.
   - **P1 alert**, one POST per P1 found in this run (new/updated, or found by
     a full-history check) to `outputs.webhook.alert_url_env`'s URL — the same
-    data as the Slack P1 card, no card-collapsing (a JSON payload has no
-    text-length limit to fit):
+    fields as the Slack P1 card for one environment, no card-collapsing (a JSON payload has no
+    text-length limit to fit). With tenants it stays one record per tenant
+    environment; the receiver decides how to merge them:
     ```json
     {
       "priority": "P1",
@@ -128,7 +150,9 @@ All outputs link each finding to its **NVD record** and **GitHub advisory**
     With tenants the scope prefixes the key
     (`vulnwatch:acme/prod:keycloak:CVE-2026-1001`), so the same finding in
     two tenant environments pages twice and each incident is acked on its
-    own; without tenants the key is the one above.
+    own; without tenants the key is the one above. PagerDuty stays one
+    incident per tenant environment, unlike Slack and Teams, because
+    environments are acknowledged and resolved separately.
   - Posted through the shared retrying client (retry on 429/5xx, the TLS
     floor); same **at-least-once** behavior as webhook — a rejected or
     failed POST (PagerDuty answers non-2xx, or retries are exhausted) fails
@@ -148,7 +172,7 @@ All outputs link each finding to its **NVD record** and **GitHub advisory**
   `routing_key_env`), never written to YAML.
 - **teams:** POSTs an **Adaptive Card** to a Microsoft Teams Workflows
   webhook — the same two moments as webhook/slack: one run summary, one card
-  per P1.
+  per P1 finding.
   ```yaml
   # config.yaml
   outputs:
@@ -184,9 +208,12 @@ All outputs link each finding to its **NVD record** and **GitHub advisory**
     }
     ```
     The heading turns `Attention` (red) when the run has a P1; the `"Failed
-    sources"` fact and the dashboard button are omitted when empty.
-  - **P1 alert**, one card per P1 found in this run (new/updated, or found
-    by a full-history check) POSTed to `outputs.teams.alert_url_env`'s URL,
+    sources"` fact and the dashboard button are omitted when empty. The
+    counts are findings (an advisory for a product); when they span more
+    tenant environments than findings, the number follows (`2 new finding(s)
+    in 5 environments`). `Open` stays per environment.
+  - **P1 alert**, one card per P1 finding found in this run (new/updated, or
+    found by a full-history check) POSTed to `outputs.teams.alert_url_env`'s URL,
     with the same fields as the Slack/webhook P1 alert and an
     `Action.OpenUrl` button to the advisory (omitted when there is no link):
     ```json
@@ -217,6 +244,14 @@ All outputs link each finding to its **NVD record** and **GitHub advisory**
       }]
     }
     ```
+    The example is a finding without tenants. A finding in several tenant
+    environments is still one card: the heading ends with `· N environments`
+    and the product is shown without an environment, the `Version` fact is
+    replaced by a bold `Affected` text and a second fact list with one fact
+    per group of environments on the same version (title: the versions,
+    value: the environments, e.g. `acme: dev; globex: test`), at most 20
+    lines and then `+N more environments`. A finding with one environment
+    keeps the card above.
   - **Alert URL falls back to the main URL** when `alert_url_env` isn't set
     (or its env var is empty): both cards POST to the same place.
   - No extra headers: the Workflows webhook URL itself carries the
