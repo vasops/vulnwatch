@@ -18,13 +18,14 @@ import (
 	"github.com/vasops/vulnwatch/internal/output/jsonout"
 	slackout "github.com/vasops/vulnwatch/internal/output/slack"
 	"github.com/vasops/vulnwatch/internal/output/stdout"
+	webhookout "github.com/vasops/vulnwatch/internal/output/webhook"
 	"github.com/vasops/vulnwatch/internal/pipeline"
 	"github.com/vasops/vulnwatch/internal/state"
 	"github.com/vasops/vulnwatch/internal/triage"
 	"github.com/vasops/vulnwatch/version"
 )
 
-var outputNames = []string{"stdout", "json", "html", "slack"}
+var outputNames = []string{"stdout", "json", "html", "slack", "webhook"}
 
 // outputFlags are shared by run and bootstrap.
 type outputFlags struct {
@@ -35,7 +36,7 @@ type outputFlags struct {
 }
 
 func (f *outputFlags) register(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&f.outputs, "output", "stdout", "comma-separated outputs: stdout,json,html,slack")
+	cmd.Flags().StringVar(&f.outputs, "output", "stdout", "comma-separated outputs: stdout,json,html,slack,webhook")
 	cmd.Flags().StringVar(&f.htmlPath, "html-path", "report.html", "target file for the html output")
 	cmd.Flags().StringVar(&f.jsonPath, "json-path", "-", "target for the json output (- = stdout)")
 	cmd.Flags().StringVar(&f.metricsFile, "metrics-file", "", "also write Prometheus metrics to this file (text format)")
@@ -220,6 +221,22 @@ func (a *app) buildOutputs(cfg *config.Config, of outputFlags, dryRun bool) ([]o
 				Channel:      a.getenv(sc.ChannelEnv),
 				AlertChannel: a.getenv(sc.AlertChannelEnv),
 			}, httpx.Plain(cfg.HTTP.Timeout.D()), a.log)
+			if err != nil {
+				return nil, err
+			}
+			outs = append(outs, o)
+		case "webhook":
+			wc := cfg.Outputs.Webhook
+			headers := map[string]string{}
+			for name, env := range wc.HeadersEnv {
+				headers[name] = a.getenv(env)
+			}
+			o, err := webhookout.New(wc, webhookout.Settings{
+				URL:      a.getenv(wc.URLEnv),
+				AlertURL: a.getenv(wc.AlertURLEnv),
+				Headers:  headers,
+				DryRun:   dryRun,
+			}, httpx.New(cfg.HTTP, version.Version, a.log), a.log)
 			if err != nil {
 				return nil, err
 			}

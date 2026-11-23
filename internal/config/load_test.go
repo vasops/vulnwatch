@@ -284,6 +284,30 @@ func TestDumpRedactsSecrets(t *testing.T) {
 	}
 }
 
+// A webhook auth header's env var (e.g. an Authorization bearer token) must
+// show up in the secrets section too, set/unset only, like every other
+// *TokenEnv: config dump should say whether it's configured without ever
+// printing its value.
+func TestDumpReportsWebhookHeaderEnvStatus(t *testing.T) {
+	cfg := exampleConfig(t)
+	cfg.Outputs.Webhook.HeadersEnv = map[string]string{"Authorization": "WEBHOOK_AUTH_HEADER"}
+	out, err := cfg.Dump(func(k string) string {
+		if k == "WEBHOOK_AUTH_HEADER" {
+			return "Bearer supersecret"
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "supersecret") {
+		t.Fatal("secret leaked")
+	}
+	if !strings.Contains(string(out), "WEBHOOK_AUTH_HEADER: set (redacted)") {
+		t.Fatalf("missing secret status:\n%s", out)
+	}
+}
+
 func TestMergeOrderAndOrigins(t *testing.T) {
 	a := Source{"a.yaml", []byte("catalog: {x: {ghsa: [o/a]}, y: {ghsa: [o/y]}}")}
 	b := Source{"b.yaml", []byte("catalog: {x: {ghsa: [o/b]}}")}

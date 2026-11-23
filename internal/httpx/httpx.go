@@ -190,16 +190,18 @@ func (c *Client) UserAgent() string { return c.ua }
 
 // StatusError is returned for non-2xx responses.
 type StatusError struct {
+	Method  string
 	URL     string
 	Status  int
 	Message string
 }
 
 func (e *StatusError) Error() string {
+	m := cmp.Or(e.Method, http.MethodGet)
 	if e.Message != "" {
-		return fmt.Sprintf("GET %s: HTTP %d: %s", e.URL, e.Status, e.Message)
+		return fmt.Sprintf("%s %s: HTTP %d: %s", m, e.URL, e.Status, e.Message)
 	}
-	return fmt.Sprintf("GET %s: HTTP %d", e.URL, e.Status)
+	return fmt.Sprintf("%s %s: HTTP %d", m, e.URL, e.Status)
 }
 
 // Do sends req with the User-Agent set and returns the body for 2xx responses.
@@ -254,7 +256,7 @@ func (c *Client) open(req *http.Request) (io.ReadCloser, http.Header, error) {
 			b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			msg = errorText(b, resp.Header.Get("Content-Type"))
 		}
-		return nil, resp.Header, &StatusError{URL: redact(req), Status: resp.StatusCode, Message: msg}
+		return nil, resp.Header, &StatusError{Method: req.Method, URL: redact(req), Status: resp.StatusCode, Message: msg}
 	}
 	return &cappedBody{ReadCloser: resp.Body, left: c.maxBody, err: &sizeError{url: redact(req), max: c.maxBody}}, resp.Header, nil
 }
@@ -356,7 +358,7 @@ func (c *Client) Download(ctx context.Context, url string, w io.Writer, limit in
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return 0, &StatusError{URL: redact(req), Status: resp.StatusCode}
+		return 0, &StatusError{Method: req.Method, URL: redact(req), Status: resp.StatusCode}
 	}
 	idle := cmp.Or(c.idle, time.Minute)
 	stalled := fmt.Errorf("%s: no data for %s", redact(req), idle)

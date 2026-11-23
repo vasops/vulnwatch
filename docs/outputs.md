@@ -32,6 +32,65 @@ All outputs link each finding to its **NVD record** and **GitHub advisory**
   - Advisory text is escaped and only `https` links without markup
     characters are linked, so a source cannot inject mentions or links.
 
+- **webhook:** POSTs plain JSON to your own HTTP endpoint (middleware, an
+  internal system) — no per-service integration to write.
+  ```yaml
+  # config.yaml
+  outputs:
+    webhook:
+      url_env: WEBHOOK_URL              # the run summary, and P1 alerts without alert_url_env
+      alert_url_env: WEBHOOK_ALERT_URL  # optional; unset: alerts go to url_env's URL too
+      headers_env:                      # optional extra headers; values come from these env vars
+        Authorization: WEBHOOK_AUTH_HEADER
+      dashboard_url: ""                 # linked from the summary; {from}/{to} become now-30d/now
+  ```
+  - **Run summary**, one POST to `outputs.webhook.url_env`'s URL:
+    ```json
+    {
+      "mode": "run",
+      "since": "2026-10-10T06:00:00Z",
+      "until": "2026-10-12T06:00:00Z",
+      "total": 2,
+      "counts": [{"priority": "P1", "count": 1}, "..."],
+      "open": [{"priority": "P1", "count": 2}, "..."],
+      "open_total": 4,
+      "dashboard": "https://grafana.example/d/vulnwatch?from=now-30d&to=now",
+      "failed_sources": ["nvd"]
+    }
+    ```
+    `counts`/`open` always list all 4 priorities (`P1`-`P4`); `dashboard` and
+    `failed_sources` are omitted when empty.
+  - **P1 alert**, one POST per P1 found in this run (new/updated, or found by
+    a full-history check) to `outputs.webhook.alert_url_env`'s URL — the same
+    data as the Slack P1 card, no card-collapsing (a JSON payload has no
+    text-length limit to fit):
+    ```json
+    {
+      "priority": "P1",
+      "id": "CVE-2026-1001",
+      "product": "keycloak",
+      "severity": "critical",
+      "cvss": 9.8,
+      "kev": true,
+      "epss": 0.91234,
+      "fixed": ["26.1.4"],
+      "action": "Upgrade to 26.1.4 today.",
+      "links": ["https://nvd.nist.gov/vuln/detail/CVE-2026-1001", "..."]
+    }
+    ```
+  - **Alert URL falls back to the main URL** when `alert_url_env` isn't set
+    (or its env var is empty): both payloads POST to the same place.
+  - **Headers**: `outputs.webhook.headers_env` maps a header name to the env
+    var holding its value (e.g. `{Authorization: WEBHOOK_AUTH_HEADER}`) —
+    auth tokens go through env vars only, never into YAML. A configured
+    header whose env var is unset or empty **fails the run at startup** and
+    names the variable, rather than POSTing an empty header all run.
+  - Posted through the shared retrying client (retry on 429/5xx, the TLS
+    floor, redacted URLs in logs); the response body is read but never
+    decoded as JSON.
+  - **At-least-once:** a failed POST (retries exhausted) fails the run, so
+    the state isn't written and the next run posts everything again.
+
 **Slack app:** create an app at api.slack.com/apps, add the bot scope
 `chat:write`, install it, put the `xoxb-…` token in `SLACK_BOT_TOKEN`, invite
 the bot to every channel and use channel **IDs** (`C0…`, in the channel

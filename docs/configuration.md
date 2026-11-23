@@ -174,6 +174,7 @@ both kinds of file are then required.
 | `SLACK_BOT_TOKEN`, `SLACK_CHANNEL`            | Slack output: bot token and summary channel ID                                                                                 |
 | `SLACK_ALERT_CHANNEL`                         | channel ID for P1 alerts (default: `SLACK_CHANNEL`)                                                                            |
 | `SLACK_NEWS_CHANNEL`                          | channel ID for `vulnwatch news` (default: `SLACK_CHANNEL`)                                                                     |
+| webhook output's `url_env`/`alert_url_env`/`headers_env` | your own names: the main URL, the P1 alert URL (default: the main URL) and any extra headers — see [Outputs](outputs.md#outputs) |
 | `CLAUDE_MODEL`, `CLAUDE_EFFORT`               | override `triage.model` (`claude-haiku-5-5`) and `triage.effort` (`high`)                                                      |
 | `REPORT_LANGUAGE`, `MAX_LLM_FINDINGS`         | override `triage.language` and `triage.max_findings`                                                                           |
 | `STACK_CONFIG`, `STATE_DB`                    | file locations (defaults `./stack.yaml`, `./vulnwatch.db`)                                                                     |

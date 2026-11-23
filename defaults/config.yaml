@@ -54,6 +54,13 @@ outputs:
     # {from} and {to} become now-30d and now: the last 30 days up to the click.
     # e.g. https://grafana.example.com/d/vulnwatch/vulnwatch?from={from}&to={to}
     dashboard_url: ""
+  webhook:
+    url_env: WEBHOOK_URL
+    alert_url_env: WEBHOOK_ALERT_URL   # unset: P1 alerts go to url_env's URL
+    # Extra headers, values from these env vars only (e.g. an auth token):
+    # headers_env:
+    #   Authorization: WEBHOOK_AUTH_HEADER
+    dashboard_url: ""
 
 # ---------------------------------------------------------------------------
 # Prometheus metrics. vulnwatch is a batch job, so it pushes its metrics to a

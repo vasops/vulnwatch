@@ -204,7 +204,22 @@ type Metrics struct {
 }
 
 type Outputs struct {
-	Slack SlackOutput `yaml:"slack"`
+	Slack   SlackOutput   `yaml:"slack"`
+	Webhook WebhookOutput `yaml:"webhook"`
+}
+
+// WebhookOutput POSTs one JSON run summary, and one JSON payload per P1
+// finding, to a plain HTTP endpoint. Auth headers are never written to YAML:
+// HeadersEnv names the header, the value comes from the named env var.
+type WebhookOutput struct {
+	URLEnv      string `yaml:"url_env"`
+	AlertURLEnv string `yaml:"alert_url_env"` // falls back to the main URL
+	// HeadersEnv maps a header name to the env var holding its value
+	// (e.g. {Authorization: WEBHOOK_AUTH_HEADER}).
+	HeadersEnv map[string]string `yaml:"headers_env,omitempty"`
+	// DashboardURL is linked from the run summary; {from} and {to} become
+	// now-30d and now.
+	DashboardURL string `yaml:"dashboard_url"`
 }
 
 type SlackOutput struct {
