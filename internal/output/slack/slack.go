@@ -417,12 +417,10 @@ func fitLines(head []string, lines []report.Line, render func(report.Line) strin
 }
 
 func distinctScopes(lines []report.Line) int {
-	var seen []report.ScopeRef
+	seen := map[report.ScopeRef]struct{}{}
 	for _, l := range lines {
 		for _, s := range l.Scopes {
-			if !slices.Contains(seen, s) {
-				seen = append(seen, s)
-			}
+			seen[s] = struct{}{}
 		}
 	}
 	return len(seen)
