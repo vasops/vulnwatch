@@ -1,0 +1,10 @@
+vulnwatch report
+Window: 2026-11-22 06:00 → 2026-11-23 06:00 UTC
+Tenants: acme/dev (1), acme/prod (1), acme/stage (1)
+
+Summary: P1 0 · P2 0 · P3 0 · P4 0 | not relevant 0 | below threshold 0 | already reported 0 | still open 0
+
+No new findings.
+
+== Weekly report · 16 – 23 Nov 2026 ==
+Nothing open. Nothing new or closed this week.

@@ -1,0 +1,38 @@
+vulnwatch report
+Window: 2026-11-22 06:00 → 2026-11-23 06:00 UTC
+Tenants: acme/dev (1), acme/prod (1), acme/stage (1)
+
+Summary: P1 0 · P2 0 · P3 0 · P4 0 | not relevant 0 | below threshold 0 | already reported 0 | still open 4
+
+No new findings.
+
+== Still open · 4 ==
+Reported earlier and still affecting the versions in stack.yaml.
+  P1  acme/dev debian-13-kernel 1.0.0  CVE-2026-98432    open 3d  (depends on exact version)
+  P1  acme/prod debian-13-kernel 1.0.0  CVE-2026-98432    open 3d  (depends on exact version)
+  P2  acme/prod keycloak 1.0.0  CVE-2026-11111    open 2d  (depends on exact version)
+  P2  acme/prod postgresql 1.0.0  CVE-2025-44444    open 142d  (depends on exact version)
+
+== Weekly report · 16 – 23 Nov 2026 ==
+Open: 4 (P1 2 · P2 2 · P3 0 · P4 0)
+New this week: 2 · Closed this week: 3
+
+New this week
+  P1 debian-13-kernel CVE-2026-98432  ipv4: free inet_opt and ireq_opt after an RCU grace period
+      acme: dev, prod
+  P2 keycloak CVE-2026-11111  Open redirect in the login flow
+      acme: prod
+
+Closed this week
+  keycloak CVE-2026-22222 · fixed
+      acme: dev, prod
+  argocd CVE-2026-44444
+      acme: prod · no longer relevant
+      acme: stage · advisory rejected
+  grafana CVE-2026-33333 · removed from the stack
+      acme: stage
+
+Open the longest
+  P2 postgresql CVE-2025-44444 · 142 days
+      Action: Upgrade to 17.6 or later.
+      acme: prod
