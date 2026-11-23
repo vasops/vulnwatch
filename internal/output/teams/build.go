@@ -2,6 +2,7 @@ package teams
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/vasops/vulnwatch/internal/report"
@@ -20,8 +21,7 @@ type attachment struct {
 	Content     adaptiveCard `json:"content"`
 }
 
-// adaptiveCard is the card itself. Teams renders schema 1.6 and older, so
-// the cards here target 1.5 and use nothing newer.
+// adaptiveCard targets schema 1.5: Teams renders 1.6 and older.
 type adaptiveCard struct {
 	Schema  string         `json:"$schema"`
 	Type    string         `json:"type"`
@@ -31,9 +31,8 @@ type adaptiveCard struct {
 	MSTeams *msTeamsConfig `json:"msteams,omitempty"`
 }
 
-// cardElement is one body element. The package needs two shapes only, a
-// TextBlock and a FactSet, so they share a struct with omitempty fields
-// rather than an interface per element type.
+// cardElement is a TextBlock or a FactSet, in one struct with omitempty
+// fields rather than an interface per type.
 type cardElement struct {
 	Type   string `json:"type"`
 	Text   string `json:"text,omitempty"`
@@ -49,24 +48,21 @@ type fact struct {
 	Value string `json:"value"`
 }
 
-// cardAction is an Action.OpenUrl button. Of the actions an Adaptive Card
-// defines, a webhook renders every one but Action.Submit; this package
-// only ever opens the advisory page.
+// cardAction is an Action.OpenUrl button; a webhook does not render
+// Action.Submit.
 type cardAction struct {
 	Type  string `json:"type"`
 	Title string `json:"title"`
 	URL   string `json:"url"`
 }
 
-// msTeamsConfig carries the Teams-specific card options; width full stops
-// the card from being rendered in a narrow column.
+// msTeamsConfig: width full stops Teams rendering the card in a narrow column.
 type msTeamsConfig struct {
 	Width string `json:"width,omitempty"`
 }
 
-// colorAttention is the Adaptive Card text color for anything P1: the
-// format has no card-level accent color, so severity is carried by the
-// heading instead of a card-level accent colour.
+// colorAttention colours the heading of a P1: the format has no card-level
+// accent colour.
 const colorAttention = "Attention"
 
 const (
@@ -78,8 +74,7 @@ const (
 	actionTypeOpenURL = "Action.OpenUrl"
 )
 
-// newCard starts an Adaptive Card with a heading, optionally coloured for a
-// P1, and wraps it in the message envelope the webhook expects.
+// newCard wraps a card with a heading in the message envelope.
 func newCard(title, text, titleColor string) message {
 	body := []cardElement{{
 		Type: "TextBlock", Text: title, Size: "Medium", Weight: "Bolder",
@@ -100,18 +95,14 @@ func newCard(title, text, titleColor string) message {
 	}
 }
 
-// card is the Adaptive Card inside m, for the builders to append to.
 func (m *message) card() *adaptiveCard { return &m.Attachments[0].Content }
 
-// addFacts appends a FactSet to the card body.
 func (m *message) addFacts(facts []fact) {
 	c := m.card()
 	c.Body = append(c.Body, cardElement{Type: "FactSet", Facts: facts})
 }
 
-// p1Item is one P1 finding as presented on a card: the fields the task
-// names (CVE, product, version, severity, CVSS, KEV/EPSS, fix, action)
-// plus the advisory link for the Action.OpenUrl button.
+// p1Item is one P1 finding as shown on a card.
 type p1Item struct {
 	ID         string
 	Product    string
@@ -123,11 +114,16 @@ type p1Item struct {
 	Fixed      []string
 	Action     string
 	Link       string
+	// Scopes is the number of environments the finding is P1 in. With one or
+	// none the card shows Constraint as a Version fact, else the Lines.
+	Scopes int
+	Lines  []report.Line
+	// ScopeNames is for the audit log.
+	ScopeNames string
 }
 
-// dashboardLink fills a Grafana URL template: {from} and {to} become now-30d
-// and now (mirrors webhook.dashboardLink / slack.Output.dashboardLink).
-// Empty tmpl: no link.
+// dashboardLink fills {from} and {to} of a Grafana URL template with now-30d
+// and now. Empty tmpl: no link.
 func dashboardLink(tmpl string) string {
 	if tmpl == "" {
 		return ""
@@ -135,8 +131,7 @@ func dashboardLink(tmpl string) string {
 	return strings.NewReplacer("{from}", "now-30d", "{to}", "now").Replace(tmpl)
 }
 
-// targetURL is where a P1 alert goes: alert if set, else the main URL
-// (mirrors webhook.targetURL).
+// targetURL is where a P1 alert goes: alert if set, else the main URL.
 func targetURL(main, alert string) string {
 	if alert != "" {
 		return alert
@@ -145,9 +140,7 @@ func targetURL(main, alert string) string {
 }
 
 // advisoryLink is the first advisory page URL, else the first non-empty of
-// links (mirrors webhook.advisoryAndOtherLinks, first element only: the
-// card carries a single Action.OpenUrl button, unlike the webhook's full
-// link list).
+// links: the card has a single button.
 func advisoryLink(advisories []report.Advisory, links []string) string {
 	for _, a := range advisories {
 		return a.URL
@@ -160,15 +153,13 @@ func advisoryLink(advisories []report.Advisory, links []string) string {
 	return ""
 }
 
-// openItemLink is advisoryLink for an OpenItem, which carries its one extra
-// reference as Link rather than a slice (mirrors webhook.openItemLinks).
+// openItemLink is advisoryLink for an OpenItem, whose extra reference is Link.
 func openItemLink(it report.OpenItem) string {
 	return advisoryLink(it.Advisories, []string{it.Link})
 }
 
-// historyAction is the action text for a P1 found by a full-history check:
-// Claude's action if it was triaged, else a generic one from the fixed
-// versions (mirrors webhook.historyAction / slack.historyAction).
+// historyAction is the action of a full-history P1: Claude's if triaged,
+// else a generic one from the fixed versions.
 func historyAction(it report.OpenItem) string {
 	switch {
 	case it.Action != "":
@@ -179,36 +170,61 @@ func historyAction(it report.OpenItem) string {
 	return "No fix released yet: check the advisory for mitigations."
 }
 
-// p1Items collects one item per P1 finding learned in this run: new or
-// updated (r.Items()), plus every P1 first seen by a full-history check
-// (r.Open, FirstSeen) — mirrors webhook.p1Payloads.
+// maxAffectedLines caps the affected facts; the rest become one fact.
+const maxAffectedLines = 20
+
+// p1Items collects one item per P1 finding: new or updated ones, then those
+// first seen by a full-history check. The two kinds are grouped separately.
 func p1Items(r report.Report) []p1Item {
 	var out []p1Item
+	var items []report.Item
 	for _, it := range r.Items() {
-		if it.Priority != "P1" {
-			continue
+		if it.Priority == "P1" {
+			items = append(items, it)
 		}
+	}
+	for _, f := range report.Findings(items) {
+		it := f.Representative
 		out = append(out, p1Item{
-			ID: it.ID, Product: report.Named(it.Scope, it.Product), Constraint: it.Constraint,
+			ID: f.ID, Product: productName(f.Scopes, it.Scope, it.Product), Constraint: it.Constraint,
 			Severity: it.Severity, CVSS: it.CVSS, KEV: it.KEV, EPSS: it.EPSS, Fixed: it.Fixed,
-			Action: it.Action, Link: advisoryLink(it.Advisories, it.Links),
+			Action: f.Action, Link: advisoryLink(it.Advisories, it.Links),
+			Scopes: len(f.Scopes), Lines: f.Lines, ScopeNames: report.ScopeList(f.Scopes),
 		})
 	}
+	var open []report.OpenItem
 	for _, it := range r.Open {
-		if it.Priority != "P1" || !it.FirstSeen {
-			continue
+		if it.Priority == "P1" && it.FirstSeen {
+			open = append(open, it)
 		}
+	}
+	for _, f := range report.OpenFindings(open, historyAction) {
+		it := f.Representative
 		out = append(out, p1Item{
-			ID: it.ID, Product: report.Named(it.Scope, it.Product), Constraint: it.Constraint,
+			ID: f.ID, Product: productName(f.Scopes, it.Scope, it.Product), Constraint: it.Constraint,
 			Severity: it.Severity, CVSS: it.CVSS, KEV: it.KEV, EPSS: it.EPSS, Fixed: it.Fixed,
-			Action: historyAction(it), Link: openItemLink(it),
+			Action: f.Action, Link: openItemLink(it),
+			Scopes: len(f.Scopes), Lines: f.Lines, ScopeNames: report.ScopeList(f.Scopes),
 		})
 	}
 	return out
 }
 
-// countLine renders "P1: 1, P2: 57", skipping zeros; "none" when every
-// priority is zero.
+// productName is bare for several environments, which the card lists under
+// Affected, else scoped.
+func productName(scopes []report.ScopeRef, scope, product string) string {
+	if len(scopes) > 1 {
+		return product
+	}
+	return report.Named(scope, product)
+}
+
+// versions shows a union constraint ("26.7.0 || 20.0.3") as a list.
+func versions(constraint string) string {
+	return strings.ReplaceAll(constraint, " || ", ", ")
+}
+
+// countLine renders "P1: 1, P2: 57", skipping zeros; "none" when all are zero.
 func countLine(cs []report.PriorityCount) string {
 	var parts []string
 	for _, c := range cs {
@@ -239,22 +255,27 @@ func hasP1(cs []report.PriorityCount) bool {
 	return false
 }
 
-// buildSummaryCard renders the run summary as one Adaptive Card: counts by
-// priority, new/open totals, the dashboard link and the sources that
-// failed — the same data as webhook.buildSummary / the Slack summary.
+// buildSummaryCard renders the run summary: counts, dashboard link and failed
+// sources.
 func buildSummaryCard(r report.Report, dashboard string) message {
 	title := "vulnwatch report · " + r.Until.Format("2 Jan 2006")
 	if r.Mode != report.ModeRun {
 		title += " (" + r.Mode + ")"
 	}
-	text := fmt.Sprintf("%d new finding(s)", r.Total())
+	// Open stays per scope so it keeps matching findings_open.
+	found := report.Count(report.Findings(r.Items()))
+	inEnvs := ""
+	if found.Scopes > found.Findings {
+		inEnvs = fmt.Sprintf(" in %d environments", found.Scopes)
+	}
+	text := fmt.Sprintf("%d new finding(s)%s", found.Findings, inEnvs)
 	open := r.CurrentOpenCounts()
 	openTotal := sumCounts(open)
 	if openTotal > 0 {
 		text += fmt.Sprintf(", %d open", openTotal)
 	}
 	facts := []fact{
-		{Title: "New", Value: fmt.Sprintf("%d (%s)", r.Total(), countLine(r.Counts))},
+		{Title: "New", Value: fmt.Sprintf("%d%s (%s)", found.Findings, inEnvs, countLine(found.ByPriority))},
 		{Title: "Open", Value: fmt.Sprintf("%d (%s)", openTotal, countLine(open))},
 		{Title: "Window", Value: r.Since.Format("2 Jan 15:04") + " → " + r.Until.Format("2 Jan 15:04 MST")},
 	}
@@ -262,7 +283,7 @@ func buildSummaryCard(r report.Report, dashboard string) message {
 		facts = append(facts, fact{Title: "Failed sources", Value: strings.Join(failed, ", ")})
 	}
 	color := ""
-	if hasP1(r.Counts) {
+	if hasP1(found.ByPriority) {
 		color = colorAttention
 	}
 	m := newCard(title, text, color)
@@ -273,9 +294,7 @@ func buildSummaryCard(r report.Report, dashboard string) message {
 	return m
 }
 
-// buildP1Card renders one P1 finding as an Adaptive Card: CVE, product,
-// version, severity, CVSS, KEV/EPSS, fix and action as facts, with an
-// Action.OpenUrl button to it.Link (when there is one).
+// buildP1Card renders one P1 finding; the button is left out without a link.
 func buildP1Card(it p1Item) message {
 	severity := it.Severity
 	if severity == "" {
@@ -298,19 +317,59 @@ func buildP1Card(it p1Item) message {
 	if len(it.Fixed) > 0 {
 		fixed = strings.Join(it.Fixed, ", ")
 	}
-	m := newCard("P1 · "+it.Product+" · "+it.ID, "", colorAttention)
-	m.addFacts([]fact{
+	heading := "P1 · " + it.Product + " · " + it.ID
+	several := it.Scopes > 1
+	if several {
+		heading += fmt.Sprintf(" · %d environments", it.Scopes)
+	}
+	facts := []fact{
 		{Title: "CVE", Value: it.ID},
 		{Title: "Product", Value: it.Product},
-		{Title: "Version", Value: it.Constraint},
-		{Title: "Severity", Value: severity},
-		{Title: "CVSS", Value: cvss},
-		{Title: "KEV/EPSS", Value: exploit},
-		{Title: "Fixed in", Value: fixed},
-		{Title: "Action", Value: it.Action},
-	})
+	}
+	if !several {
+		facts = append(facts, fact{Title: "Version", Value: it.Constraint})
+	}
+	facts = append(facts,
+		fact{Title: "Severity", Value: severity},
+		fact{Title: "CVSS", Value: cvss},
+		fact{Title: "KEV/EPSS", Value: exploit},
+		fact{Title: "Fixed in", Value: fixed},
+		fact{Title: "Action", Value: it.Action},
+	)
+	m := newCard(heading, "", colorAttention)
+	m.addFacts(facts)
+	if several {
+		m.card().Body = append(m.card().Body, cardElement{Type: "TextBlock", Text: "Affected", Weight: "Bolder", Wrap: true})
+		m.addFacts(affectedFacts(it.Lines))
+	}
 	if it.Link != "" {
 		m.card().Actions = []cardAction{{Type: actionTypeOpenURL, Title: "View advisory", URL: it.Link}}
 	}
 	return m
+}
+
+// affectedFacts is one fact per affected line (versions: environments); the
+// lines past the cap are counted in one last fact.
+func affectedFacts(lines []report.Line) []fact {
+	var out []fact
+	for i, l := range lines {
+		if i == maxAffectedLines {
+			var rest []report.ScopeRef
+			for _, l := range lines[i:] {
+				for _, s := range l.Scopes {
+					if !slices.Contains(rest, s) {
+						rest = append(rest, s)
+					}
+				}
+			}
+			noun := "environments"
+			if len(rest) == 1 {
+				noun = "environment"
+			}
+			out = append(out, fact{Title: fmt.Sprintf("+%d more %s", len(rest), noun), Value: ""})
+			break
+		}
+		out = append(out, fact{Title: versions(l.Constraint), Value: l.Names()})
+	}
+	return out
 }
