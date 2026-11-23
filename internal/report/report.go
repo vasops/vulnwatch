@@ -79,6 +79,8 @@ type Report struct {
 	MultiTenant bool `json:"multi_tenant,omitempty"`
 	// Scopes are the local stack and every tenant environment in the run.
 	Scopes []ScopeInfo `json:"scopes,omitempty"`
+	// Weekly is set when the run sends the weekly report.
+	Weekly *Weekly `json:"weekly,omitempty"`
 }
 
 // ScopeInfo is one tenant environment (or the local stack) in the run.
@@ -254,6 +256,9 @@ type Meta struct {
 	KernelFiltered  int
 	SingleSource    map[string]int
 	TriageFailures  int
+	// Weekly, when set, asks for the weekly report: its window (From,
+	// Until) and closed findings; Build fills in the rest.
+	Weekly *Weekly
 }
 
 // Build assembles the report: grouped by priority, then product; relevant:
@@ -372,6 +377,18 @@ func Build(m Meta, entries []Entry) Report {
 		}
 		g.Products[pn-1].Items = append(g.Products[pn-1].Items, it)
 	}
+	if w := m.Weekly; w != nil {
+		closed := slices.Clone(w.Closed)
+		for i := range closed {
+			closed[i].Scope = scope(closed[i].Tenant, closed[i].Environment)
+			closed[i].Advisories = m.Links.For(append([]string{closed[i].ID}, closed[i].Aliases...), closed[i].References...)
+		}
+		slices.SortStableFunc(closed, func(a, b ClosedItem) int {
+			return cmp.Or(cmp.Compare(rank(a.Priority), rank(b.Priority)), cmp.Compare(a.Tenant, b.Tenant),
+				cmp.Compare(a.Environment, b.Environment), cmp.Compare(a.Product, b.Product), cmp.Compare(a.ID, b.ID))
+		})
+		r.Weekly = r.weekly(w.From, w.Until, closed)
+	}
 	return r
 }
 
@@ -471,6 +488,17 @@ func (r Report) ForScopes(keep func(ScopeInfo) bool, keepRunWide bool) Report {
 			}
 		}
 		out.Counts = append(out.Counts, PriorityCount{c.Priority, n})
+	}
+	if r.Weekly != nil {
+		known := func(tenant, env string) bool {
+			return slices.ContainsFunc(r.Scopes, func(s ScopeInfo) bool { return s.Tenant == tenant && s.Environment == env })
+		}
+		// A closed finding of an environment no longer in the stack has no
+		// route of its own: the default one (keepRunWide) gets it.
+		closed := slices.DeleteFunc(slices.Clone(r.Weekly.Closed), func(it ClosedItem) bool {
+			return !in(it.Tenant, it.Environment) && (!keepRunWide || known(it.Tenant, it.Environment))
+		})
+		out.Weekly = out.weekly(r.Weekly.From, r.Weekly.Until, closed)
 	}
 	if !keepRunWide {
 		out.Warnings, out.Sources, out.UnmatchedImages = nil, nil, nil
