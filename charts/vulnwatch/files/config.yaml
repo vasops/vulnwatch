@@ -54,6 +54,13 @@ outputs:
     # {from} and {to} become now-30d and now: the last 30 days up to the click.
     # e.g. https://grafana.example.com/d/vulnwatch/vulnwatch?from={from}&to={to}
     dashboard_url: ""
+    # Weekly report per route (tenant channel, or the default channel): open
+    # findings, new and closed in the last seven days, the oldest open ones.
+    # Posted by the daily run on this day (local time of the job); a missed
+    # week is caught up by the next run. Preview: run --weekly --dry-run.
+    weekly:
+      enabled: false
+      day: monday               # sunday … saturday
   webhook:
     url_env: WEBHOOK_URL
     alert_url_env: WEBHOOK_ALERT_URL   # unset: P1 alerts go to url_env's URL
