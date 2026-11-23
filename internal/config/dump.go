@@ -15,7 +15,7 @@ func (c *Config) SecretStatus(getenv func(string) string) map[string]string {
 	}
 	names := []string{
 		c.Sources.GHSA.TokenEnv, c.Sources.NVD.APIKeyEnv, c.Sources.CVEList.TokenEnv, c.Triage.APIKeyEnv,
-		c.Outputs.Slack.TokenEnv,
+		c.Outputs.Slack.TokenEnv, c.Outputs.PagerDuty.RoutingKeyEnv,
 	}
 	for _, env := range c.Outputs.Webhook.HeadersEnv {
 		names = append(names, env)

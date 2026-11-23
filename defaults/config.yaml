@@ -61,6 +61,8 @@ outputs:
     # headers_env:
     #   Authorization: WEBHOOK_AUTH_HEADER
     dashboard_url: ""
+  pagerduty:
+    routing_key_env: PAGERDUTY_ROUTING_KEY   # Events API v2 integration key
 
 # ---------------------------------------------------------------------------
 # Prometheus metrics. vulnwatch is a batch job, so it pushes its metrics to a
