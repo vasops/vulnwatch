@@ -9,6 +9,9 @@ vulnwatch run                  the daily run
   --dry-run                    no state writes, no Slack
   --since 2026-10-01           override the window start
   --product keycloak           limit to products (repeatable; in every tenant)
+  --weekly                     build and send the weekly report whatever the day, without recording it
+                               (preview: --weekly --dry-run --output stdout); a run with --product never
+                               sends it without --weekly
   --metrics-file f.prom        also write the metrics to a file
 vulnwatch bootstrap            full-history check of every product, nothing reported as new
   --skip-if-initialized        no-op once a run succeeded (safe as a deploy hook)

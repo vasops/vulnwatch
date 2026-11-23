@@ -44,6 +44,58 @@ All outputs link each finding to its **NVD record** and **GitHub advisory**
     of the environments where the finding is P1, with their versions. More
     than 5 P1 findings from full-history checks (a new tenant, a lost state)
     share one card, which groups environments the same way.
+  - **Weekly report** (`outputs.slack.weekly`, off by default): once a week
+    the daily run also posts, after the summary and the P1 alerts, one
+    message per channel (the summary's channel, not the alert channel)
+    about the time since the last weekly report (seven days when there is
+    none, or it is more than 14 days old): open findings per priority (per
+    environment, like `Open` in the summary), the findings first reported
+    and the findings closed in the week, and the five open the longest
+    among those reported before the week. The header names the tenant when
+    the channel serves one, and the window's first and last day.
+    Closed findings say why: `fixed`, `removed from the stack`,
+    `advisory rejected` or `no longer relevant` (see
+    [closures](how-it-works.md#closed-findings)). Findings are grouped across
+    environments like the summary; no versions. At most 10 new and 10 closed
+    findings are listed, then `+N more on the dashboard`. A channel with
+    nothing open, new or closed gets `Nothing open. Nothing new or closed this
+    week.` The stdout output prints the same parts after its report.
+    ```
+    :calendar: vulnwatch weekly · acme · 16 – 23 Nov 2026
+    Open: 4   :red_circle: 2   :large_orange_circle: 2
+    New this week: 2 · Closed this week: 2 in 3 environments
+
+    New this week
+    :red_circle: debian-13-kernel · CVE-2026-98432  ipv4: free inet_opt and ireq_opt after an RCU grace period
+          • acme: dev, prod
+    :large_orange_circle: keycloak · CVE-2026-11111  Open redirect in the login flow
+          • acme: prod
+
+    Closed this week
+    keycloak · CVE-2026-22222 · fixed
+          • acme: dev, prod
+    grafana · CVE-2026-33333 · removed from the stack
+          • acme: stage
+
+    Open the longest
+    :large_orange_circle: postgresql · CVE-2025-44444 · 142 days
+          ↳ Upgrade to 17.6 or later.
+          • acme: prod
+    ```
+    It is due when today (the job's local time) is `outputs.slack.weekly.day`
+    and none was sent today, or when the last one is more than seven days
+    old (a missed week is caught up the next day and covers the whole gap).
+    After enabling, the first one waits for that day. A run limited with
+    `--product` sends none without `--weekly`, and `bootstrap` sends none.
+    When a due report was sent is kept in the state with the run, so a
+    failed run or post repeats it the next day and a rerun does not; the
+    very first report after enabling is the exception (see
+    [Configuration](configuration.md#configyaml-and-sourcesyaml)).
+    `vulnwatch run --weekly` sends it on any day without recording it, so
+    the schedule and the next report's window stay; with
+    `--dry-run --output stdout` it is a preview. In the JSON output, the
+    weekly data's `from` and `until` carry the time zone of the run, unlike
+    the other times of the report, which are UTC.
   - **Tenants** with their own `slack.channel` get their own summary and
     alerts (see [Tenants](tenants.md#tenants)).
   - **At-least-once:** a P1 is alerted when new or materially changed. A
