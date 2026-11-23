@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -446,12 +447,17 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 	fs = img.dropUnfixedImageOnly(fs)
 	o.Log.Info("collected", "raw", len(raw), "deduplicated", len(fs), "source_warnings", len(warnings))
 
-	// 7. Enrich. The KEV catalog also goes over the earlier findings this
-	// run didn't fetch (refresh); those it lists now are re-checked below.
-	kevFailed := false
+	// 7. Enrich. The KEV catalog and EPSS also go over the earlier findings
+	// this run didn't fetch (refresh); those KEV lists now, or whose EPSS
+	// crossed the threshold, are re-checked below.
+	storedEPSS := make([]float64, len(refresh))
+	for i, f := range refresh {
+		storedEPSS[i] = f.EPSS
+	}
+	kevFailed, epssFailed := false, false
 	for _, e := range o.Enrichers {
 		target := fs
-		if e.Name() == kev.Name {
+		if e.Name() == kev.Name || e.Name() == epss.Name {
 			target = slices.Concat(fs, refresh)
 			fs, refresh = target[:len(fs):len(fs)], target[len(fs):]
 		}
@@ -462,10 +468,16 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 			o.Log.Warn("enrichment failed", "source", e.Name(), "err", err)
 			warnings = append(warnings, fmt.Sprintf("%s (enrichment): %v", e.Name(), err))
 			kevFailed = kevFailed || e.Name() == kev.Name
+			epssFailed = epssFailed || e.Name() == epss.Name
 		}
 	}
 	if kevFailed {
 		if err := carryKEV(ctx, o.Store, fs); err != nil {
+			return nil, fmt.Errorf("state lookup: %w", err)
+		}
+	}
+	if epssFailed {
+		if err := carryEPSS(ctx, o.Store, fs); err != nil {
 			return nil, fmt.Errorf("state lookup: %w", err)
 		}
 	}
@@ -477,6 +489,15 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 	}
 	if n := len(fs) - nKEV; n > 0 {
 		o.Log.Info("open findings added to CISA KEV", "count", n)
+	}
+	nEPSS := len(fs)
+	for i, f := range refresh {
+		if !f.KEV && epssCrossed(storedEPSS[i], f.EPSS) {
+			fs = append(fs, f)
+		}
+	}
+	if n := len(fs) - nEPSS; n > 0 {
+		o.Log.Info("open findings above the EPSS threshold", "count", n)
 	}
 
 	// Image findings without an advisory, and kernel fixes: only those worth reporting.
@@ -557,6 +578,12 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 			continue
 		}
 		changes := finding.Changes(prior.Snapshot, f.Snapshot())
+		// The base is the EPSS stored with the last report, not the snapshot:
+		// a snapshot field would re-report every finding already above it.
+		if d := prior.Detail; d != nil && !prior.Snapshot.KEV && !d.Finding.KEV && !f.KEV &&
+			f.Match != string(match.NotAffected) && epssCrossed(d.Finding.EPSS, f.EPSS) {
+			changes = append(changes, epssChange(d.Finding.EPSS, f.EPSS))
+		}
 		if len(changes) == 0 {
 			unchanged++
 			if prior.Detail != nil && prior.Detail.Untriaged && f.Match != string(match.NotAffected) {
@@ -1032,6 +1059,26 @@ func kevCandidates(ctx context.Context, store *state.Store, products []catalog.P
 	return out, nil
 }
 
+// epssCrossed reports an EPSS that rose from below triage.EPSSHigh to it or
+// above: the rule priority changes there.
+func epssCrossed(stored, now float64) bool {
+	return stored < triage.EPSSHigh && now >= triage.EPSSHigh
+}
+
+func epssChange(from, to float64) string {
+	return fmt.Sprintf("EPSS rose to %s (from %s)", percent(to), percent(from))
+}
+
+// percent truncates to whole percent, so a value below the threshold never
+// reads as at it; a non-zero value below one is "<1%". The epsilon undoes
+// float error such as 0.57*100 = 56.999...
+func percent(v float64) string {
+	if p := math.Floor(v*100 + 1e-9); p >= 1 || v <= 0 {
+		return fmt.Sprintf("%.0f%%", p)
+	}
+	return "<1%"
+}
+
 // carryKEV keeps the stored KEV flag when the KEV catalog couldn't be read
 // at all: otherwise the flag is lost now and its return is reported as
 // "added to CISA KEV".
@@ -1051,6 +1098,23 @@ func carryKEV(ctx context.Context, store *state.Store, fs []finding.Finding) err
 		if prior.Detail != nil {
 			fs[i].KEVDateAdded = prior.Detail.Finding.KEVDateAdded
 		}
+	}
+	return nil
+}
+
+// carryEPSS keeps the stored EPSS when the EPSS source failed: otherwise a
+// finding re-reported for another reason is stored with 0, and the next run
+// reports a rise that never happened.
+func carryEPSS(ctx context.Context, store *state.Store, fs []finding.Finding) error {
+	for i := range fs {
+		prior, err := store.Lookup(ctx, fs[i].Product, fs[i].IDs())
+		if err != nil {
+			return err
+		}
+		if prior == nil || prior.Detail == nil || prior.Detail.Finding.EPSS <= fs[i].EPSS {
+			continue
+		}
+		fs[i].EPSS, fs[i].EPSSPercentile = prior.Detail.Finding.EPSS, prior.Detail.Finding.EPSSPercentile
 	}
 	return nil
 }
