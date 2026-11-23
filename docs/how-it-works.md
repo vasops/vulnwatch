@@ -79,6 +79,15 @@ flowchart LR
    high-criticality products; EPSS ≥ 0.1 only raises a priority; and unless
    exploited, a finding that may not affect your version (match unknown) is at
    most P2.
+
+   **What triage costs:** a run sends about `max_findings / batch_size`
+   batches (one more when findings owed from earlier runs are retried in the
+   same run), each sent at most twice; with the defaults that is 5 or 6
+   batches. `vulnwatch_triage_requests` and `vulnwatch_triage_tokens`
+   give the requests and tokens of the last run. Cost is tokens times the
+   price of your model, for example
+   `vulnwatch_triage_tokens{type="input"} * <input price per token> + ...`
+   with one term per token type.
 8. **Report and state:** outputs render, then the state is written. It is
    written only if every output succeeded, so a failed Slack post is reported
    again next time (at-least-once: channels that worked may get it twice).
