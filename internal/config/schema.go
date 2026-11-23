@@ -207,6 +207,7 @@ type Outputs struct {
 	Slack     SlackOutput     `yaml:"slack"`
 	Webhook   WebhookOutput   `yaml:"webhook"`
 	PagerDuty PagerDutyOutput `yaml:"pagerduty"`
+	Teams     TeamsOutput     `yaml:"teams"`
 }
 
 // WebhookOutput POSTs one JSON run summary, and one JSON payload per P1
@@ -228,6 +229,17 @@ type WebhookOutput struct {
 // key is needed, and it's never written to YAML, only to the named env var.
 type PagerDutyOutput struct {
 	RoutingKeyEnv string `yaml:"routing_key_env"`
+}
+
+// TeamsOutput POSTs an Adaptive Card to a Teams Workflows webhook: one run
+// summary to the main URL, one per P1 finding to the alert URL (falling
+// back to the main URL, like WebhookOutput).
+type TeamsOutput struct {
+	URLEnv      string `yaml:"url_env"`
+	AlertURLEnv string `yaml:"alert_url_env"` // falls back to the main URL
+	// DashboardURL is linked from the run summary; {from} and {to} become
+	// now-30d and now.
+	DashboardURL string `yaml:"dashboard_url"`
 }
 
 type SlackOutput struct {

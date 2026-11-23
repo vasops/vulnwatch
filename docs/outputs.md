@@ -146,12 +146,108 @@ All outputs link each finding to its **NVD record** and **GitHub advisory**
   detail (the icon to its right) and copy its **Integration Key** — that's
   the value for `PAGERDUTY_ROUTING_KEY` (or your own env var named in
   `routing_key_env`), never written to YAML.
+- **teams:** POSTs an **Adaptive Card** to a Microsoft Teams Workflows
+  webhook — the same two moments as webhook/slack: one run summary, one card
+  per P1.
+  ```yaml
+  # config.yaml
+  outputs:
+    teams:
+      url_env: TEAMS_URL              # the run summary, and P1 alerts without alert_url_env
+      alert_url_env: TEAMS_ALERT_URL  # optional; unset: alerts go to url_env's URL too
+      dashboard_url: ""               # linked from the summary; {from}/{to} become now-30d/now
+  ```
+  - **Run summary**, one card POSTed to `outputs.teams.url_env`'s URL:
+    ```json
+    {
+      "type": "message",
+      "attachments": [{
+        "contentType": "application/vnd.microsoft.card.adaptive",
+        "content": {
+          "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+          "type": "AdaptiveCard",
+          "version": "1.5",
+          "msteams": {"width": "full"},
+          "body": [
+            {"type": "TextBlock", "text": "vulnwatch report · 12 Oct 2026", "size": "Medium", "weight": "Bolder", "wrap": true},
+            {"type": "TextBlock", "text": "2 new finding(s), 4 open", "wrap": true},
+            {"type": "FactSet", "facts": [
+              {"title": "New", "value": "2 (P1: 1, P2: 1)"},
+              {"title": "Open", "value": "4 (P1: 2, P3: 2)"},
+              {"title": "Window", "value": "10 Oct 06:00 → 12 Oct 06:00 UTC"},
+              {"title": "Failed sources", "value": "nvd"}
+            ]}
+          ],
+          "actions": [{"type": "Action.OpenUrl", "title": "Open the dashboard", "url": "https://grafana.example/d/vulnwatch?from=now-30d&to=now"}]
+        }
+      }]
+    }
+    ```
+    The heading turns `Attention` (red) when the run has a P1; the `"Failed
+    sources"` fact and the dashboard button are omitted when empty.
+  - **P1 alert**, one card per P1 found in this run (new/updated, or found
+    by a full-history check) POSTed to `outputs.teams.alert_url_env`'s URL,
+    with the same fields as the Slack/webhook P1 alert and an
+    `Action.OpenUrl` button to the advisory (omitted when there is no link):
+    ```json
+    {
+      "type": "message",
+      "attachments": [{
+        "contentType": "application/vnd.microsoft.card.adaptive",
+        "content": {
+          "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+          "type": "AdaptiveCard",
+          "version": "1.5",
+          "msteams": {"width": "full"},
+          "body": [
+            {"type": "TextBlock", "text": "P1 · keycloak · CVE-2026-1001", "size": "Medium", "weight": "Bolder", "color": "Attention", "wrap": true},
+            {"type": "FactSet", "facts": [
+              {"title": "CVE", "value": "CVE-2026-1001"},
+              {"title": "Product", "value": "keycloak"},
+              {"title": "Version", "value": "26.x"},
+              {"title": "Severity", "value": "critical"},
+              {"title": "CVSS", "value": "9.8"},
+              {"title": "KEV/EPSS", "value": "exploited in the wild (CISA KEV) · EPSS 91.2%"},
+              {"title": "Fixed in", "value": "26.1.4"},
+              {"title": "Action", "value": "Upgrade to 26.1.4 today."}
+            ]}
+          ],
+          "actions": [{"type": "Action.OpenUrl", "title": "View advisory", "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-1001"}]
+        }
+      }]
+    }
+    ```
+  - **Alert URL falls back to the main URL** when `alert_url_env` isn't set
+    (or its env var is empty): both cards POST to the same place.
+  - No extra headers: the Workflows webhook URL itself carries the
+    authorization, posted through the shared retrying client (retry on
+    429/5xx, the TLS floor, redacted URLs in logs); the response body is read
+    but never decoded as JSON.
+  - **At-least-once:** a failed POST (retries exhausted) fails the run, so
+    the state isn't written and the next run posts everything again.
+  - **Card schema 1.5.** Teams renders Adaptive Card 1.6 and older, on
+    desktop and mobile; nothing newer is used. The legacy MessageCard format
+    is deliberately not sent: a Workflows webhook still accepts it, but it
+    cannot render buttons and Microsoft points new integrations at Adaptive
+    Cards. Messages posted through a webhook always show the Workflows (Flow
+    bot) identity — a custom bot name or icon is not available either way.
 
 **Slack app:** create an app at api.slack.com/apps, add the bot scope
 `chat:write`, install it, put the `xoxb-…` token in `SLACK_BOT_TOKEN`, invite
 the bot to every channel and use channel **IDs** (`C0…`, in the channel
 details). The app icon is [`logo/icon-512.png`](../logo/icon-512.png) on
 `#0B1410`.
+
+**Teams Workflows webhook:** Office 365 Connectors (the old "Incoming
+Webhook" connector UI) were retired in May 2026; webhooks are now created
+through the **Workflows** app, which is what this output POSTs its Adaptive
+Cards to. In the target channel: **⋯ (more options) →
+Workflows**, search for the **"Send webhook alerts to a channel"** template
+(or build one from scratch with the **"When a Teams webhook request is
+received"** trigger), point it at that channel, save, then copy the
+generated webhook URL into `TEAMS_URL`. For P1s in a separate channel,
+repeat in that channel and put its URL in `TEAMS_ALERT_URL`; without it, P1
+alerts post to the same channel as the summary.
 
 ## Metrics and dashboards
 
