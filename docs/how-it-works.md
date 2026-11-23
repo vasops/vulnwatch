@@ -58,8 +58,8 @@ flowchart LR
 4. **Match:** each advisory is compared with the version you run (see
    [Version matching](#version-matching)).
 5. **New or changed:** a finding is reported once when new, and again only on
-   a material change: higher severity, added to KEV, a new fixed version or a
-   different match.
+   a material change: higher severity, added to KEV, an EPSS that rose from
+   below 0.1 to 0.1 or above, a new fixed version or a different match.
 6. **min_cvss:** findings below the product's threshold are counted, not
    listed. KEV-listed findings are always kept.
 7. **Triage:** Claude returns whether it's relevant, a priority (P1 act today,
@@ -76,9 +76,10 @@ flowchart LR
    still-open finding gets the more urgent of Claude's priority and the
    rules' priority now. The rules weigh KEV, CVSS, exposure and criticality;
    CISA's SSVC exploitation "active" counts like KEV on internet-facing or
-   high-criticality products; EPSS ≥ 0.1 only raises a priority; and unless
-   exploited, a finding that may not affect your version (match unknown) is at
-   most P2.
+   high-criticality products; EPSS ≥ 0.1 only raises a priority (a rise across
+   0.1 is reported again as "EPSS rose to 82% (from 1%)", so the priority
+   follows); and unless exploited, a finding that may not affect your version
+   (match unknown) is at most P2.
 
    **What triage costs:** a run sends about `max_findings / batch_size`
    batches (one more when findings owed from earlier runs are retried in the
@@ -103,7 +104,7 @@ flowchart LR
   newadv["New advisory<br/>affects our version"] --> reported["Reported<br/>Slack · report · dashboard"]
   oldadv["Old advisory<br/>found by a full-history check"] --> open
   reported --> open["Still open<br/>listed in every run"]
-  open --> change["Material change<br/>KEV · severity · fix · match"]
+  open --> change["Material change<br/>KEV · EPSS · severity · fix · match"]
   change --> reported
   open --> closed["Closed<br/>upgraded past the fix,<br/>product removed,<br/>not relevant or rejected"]
 
@@ -298,9 +299,16 @@ sources:
   for CVE-2026-16443 says `< 26.37.1` where it means `< 26.7.1`. Report such
   errors upstream.
 - Still-open findings use the data stored when they were last reported; a later
-  change outside the window (e.g. a new fixed version) isn't picked up. KEV is
-  the exception: every run checks open findings against the catalog. When the
-  catalog can't be downloaded, the last cached copy is used.
+  change outside the window (e.g. a new fixed version) isn't picked up. KEV
+  and EPSS are the exceptions: every run checks open findings against the KEV
+  catalog. When the catalog can't be downloaded, the last cached copy is used.
+  The EPSS re-check covers open findings that have a CVE ID and are not
+  KEV-listed. It reports only a rise from below 0.1 to 0.1 or above; other
+  rises and falls are not reported, and the open list keeps showing the EPSS
+  from the last report. When the EPSS source fails, nothing is reported for
+  EPSS, and when FIRST cannot be reached, findings keep the EPSS stored with
+  their last report. When a product gets a full-history check, the current EPSS of its
+  older findings is recorded without a report.
 - Some products have no CPE in NVD (NetBird), so NVD can't find them.
 - `stack discover` reads versions from image tags. Images pinned only by
   digest, or tagged `latest`, are listed without a version; exposure only
