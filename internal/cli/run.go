@@ -16,6 +16,7 @@ import (
 	"github.com/vasops/vulnwatch/internal/output"
 	"github.com/vasops/vulnwatch/internal/output/html"
 	"github.com/vasops/vulnwatch/internal/output/jsonout"
+	pagerdutyout "github.com/vasops/vulnwatch/internal/output/pagerduty"
 	slackout "github.com/vasops/vulnwatch/internal/output/slack"
 	"github.com/vasops/vulnwatch/internal/output/stdout"
 	webhookout "github.com/vasops/vulnwatch/internal/output/webhook"
@@ -25,7 +26,7 @@ import (
 	"github.com/vasops/vulnwatch/version"
 )
 
-var outputNames = []string{"stdout", "json", "html", "slack", "webhook"}
+var outputNames = []string{"stdout", "json", "html", "slack", "webhook", "pagerduty"}
 
 // outputFlags are shared by run and bootstrap.
 type outputFlags struct {
@@ -36,7 +37,7 @@ type outputFlags struct {
 }
 
 func (f *outputFlags) register(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&f.outputs, "output", "stdout", "comma-separated outputs: stdout,json,html,slack,webhook")
+	cmd.Flags().StringVar(&f.outputs, "output", "stdout", "comma-separated outputs: stdout,json,html,slack,webhook,pagerduty")
 	cmd.Flags().StringVar(&f.htmlPath, "html-path", "report.html", "target file for the html output")
 	cmd.Flags().StringVar(&f.jsonPath, "json-path", "-", "target for the json output (- = stdout)")
 	cmd.Flags().StringVar(&f.metricsFile, "metrics-file", "", "also write Prometheus metrics to this file (text format)")
@@ -236,6 +237,16 @@ func (a *app) buildOutputs(cfg *config.Config, of outputFlags, dryRun bool) ([]o
 				AlertURL: a.getenv(wc.AlertURLEnv),
 				Headers:  headers,
 				DryRun:   dryRun,
+			}, httpx.New(cfg.HTTP, version.Version, a.log), a.log)
+			if err != nil {
+				return nil, err
+			}
+			outs = append(outs, o)
+		case "pagerduty":
+			pc := cfg.Outputs.PagerDuty
+			o, err := pagerdutyout.New(pc, pagerdutyout.Settings{
+				RoutingKey: a.getenv(pc.RoutingKeyEnv),
+				DryRun:     dryRun,
 			}, httpx.New(cfg.HTTP, version.Version, a.log), a.log)
 			if err != nil {
 				return nil, err

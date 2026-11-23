@@ -204,8 +204,9 @@ type Metrics struct {
 }
 
 type Outputs struct {
-	Slack   SlackOutput   `yaml:"slack"`
-	Webhook WebhookOutput `yaml:"webhook"`
+	Slack     SlackOutput     `yaml:"slack"`
+	Webhook   WebhookOutput   `yaml:"webhook"`
+	PagerDuty PagerDutyOutput `yaml:"pagerduty"`
 }
 
 // WebhookOutput POSTs one JSON run summary, and one JSON payload per P1
@@ -220,6 +221,13 @@ type WebhookOutput struct {
 	// DashboardURL is linked from the run summary; {from} and {to} become
 	// now-30d and now.
 	DashboardURL string `yaml:"dashboard_url"`
+}
+
+// PagerDutyOutput triggers one PagerDuty Events API v2 event per P1 finding,
+// at the fixed enqueue endpoint (not configurable here): only the routing
+// key is needed, and it's never written to YAML, only to the named env var.
+type PagerDutyOutput struct {
+	RoutingKeyEnv string `yaml:"routing_key_env"`
 }
 
 type SlackOutput struct {

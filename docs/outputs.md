@@ -91,6 +91,62 @@ All outputs link each finding to its **NVD record** and **GitHub advisory**
   - **At-least-once:** a failed POST (retries exhausted) fails the run, so
     the state isn't written and the next run posts everything again.
 
+- **pagerduty:** triggers a real PagerDuty incident per P1, no webhook in
+  between — POSTs straight to PagerDuty's own Events API v2 endpoint
+  (`https://events.pagerduty.com/v2/enqueue`, fixed, not configurable).
+  ```yaml
+  # config.yaml
+  outputs:
+    pagerduty:
+      routing_key_env: PAGERDUTY_ROUTING_KEY  # the Events API v2 integration key
+  ```
+  - Only **P1 findings** learned in this run trigger an event: new or
+    updated, plus every P1 a full-history check found for the first time (a
+    new tenant, a lost state), the same findings Slack, webhook and teams
+    alert on. Every other priority, and the run summary, stay silent —
+    PagerDuty is a page, not a report (see Slack/webhook above for that).
+    A `bootstrap` of a stack with many open P1s pages for each of them: run
+    it before the integration key is live if that is not what you want.
+  - **Priority → severity:** P1 is the only priority this output ever sees,
+    and it always maps to PagerDuty's `critical` severity — hardcoded, not
+    the finding's own CVSS severity:
+    ```json
+    {
+      "routing_key": "<PAGERDUTY_ROUTING_KEY>",
+      "event_action": "trigger",
+      "dedup_key": "vulnwatch:keycloak:CVE-2026-1001",
+      "payload": {
+        "summary": "CVE-2026-1001: Account takeover via crafted <redirect_uri>",
+        "source": "keycloak",
+        "severity": "critical",
+        "component": "keycloak"
+      }
+    }
+    ```
+    `dedup_key` is stable per (scope, product, CVE/GHSA id): a re-triggered
+    event updates the same PagerDuty incident instead of opening a new one.
+    With tenants the scope prefixes the key
+    (`vulnwatch:acme/prod:keycloak:CVE-2026-1001`), so the same finding in
+    two tenant environments pages twice and each incident is acked on its
+    own; without tenants the key is the one above.
+  - Posted through the shared retrying client (retry on 429/5xx, the TLS
+    floor); same **at-least-once** behavior as webhook — a rejected or
+    failed POST (PagerDuty answers non-2xx, or retries are exhausted) fails
+    the run, the state isn't written, and the next run pages again.
+  - `PAGERDUTY_ROUTING_KEY` (or whatever env var `routing_key_env` names)
+    never reaches a log line or `config dump` (redacted like the Slack bot
+    token).
+  - No auto-resolve: when a finding stops being open, vulnwatch never sends
+    an `event_action: "resolve"` — closing or acknowledging the PagerDuty
+    incident stays a human (or PagerDuty's own auto-resolve timeout) call.
+
+  **Set up the PagerDuty side:** open the service in PagerDuty's Service
+  Directory → **Integrations** tab → **Add another integration** → search
+  for and select **Events API V2** → once added, open the integration's
+  detail (the icon to its right) and copy its **Integration Key** — that's
+  the value for `PAGERDUTY_ROUTING_KEY` (or your own env var named in
+  `routing_key_env`), never written to YAML.
+
 **Slack app:** create an app at api.slack.com/apps, add the bot scope
 `chat:write`, install it, put the `xoxb-…` token in `SLACK_BOT_TOKEN`, invite
 the bot to every channel and use channel **IDs** (`C0…`, in the channel
