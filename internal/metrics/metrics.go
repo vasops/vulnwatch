@@ -170,6 +170,15 @@ func Registry(r Run) *Metrics {
 	untriaged.WithLabelValues().Set(float64(nUntriaged))
 	gauge("triage_failures", "Claude triage calls (batches) that failed in the last run: API error, or invalid output after the retry; their findings got the rule-based priority.").
 		WithLabelValues().Set(float64(rep.TriageFailures))
+	if tu := rep.TriageUsage; tu != nil {
+		gauge("triage_requests", "Claude triage requests that got a response in the last run, by model.", "model").
+			WithLabelValues(tu.Model).Set(float64(tu.Requests))
+		tokens := gauge("triage_tokens", "Tokens the Claude triage used in the last run, by model and type (input, output, cache_creation, cache_read).", "model", "type")
+		tokens.WithLabelValues(tu.Model, "input").Set(float64(tu.InputTokens))
+		tokens.WithLabelValues(tu.Model, "output").Set(float64(tu.OutputTokens))
+		tokens.WithLabelValues(tu.Model, "cache_creation").Set(float64(tu.CacheCreationInputTokens))
+		tokens.WithLabelValues(tu.Model, "cache_read").Set(float64(tu.CacheReadInputTokens))
+	}
 	for k, a := range per {
 		for _, prio := range triage.Priorities {
 			open.WithLabelValues(k[0], k[1], k[2], prio).Set(float64(a.byPrio[prio]))

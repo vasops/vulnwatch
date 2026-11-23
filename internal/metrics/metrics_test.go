@@ -147,6 +147,28 @@ vulnwatch_triage_failures 2
 	}
 }
 
+func TestRegistryTriageUsage(t *testing.T) {
+	rep := reporttest.Sample()
+	if n, err := testutil.GatherAndCount(Registry(Run{Mode: "run", Report: &rep}), "vulnwatch_triage_requests", "vulnwatch_triage_tokens"); err != nil || n != 0 {
+		t.Fatalf("no usage, no series: %d %v", n, err)
+	}
+	rep.TriageUsage = &report.TriageUsage{Model: "claude-test", Requests: 3, InputTokens: 1200, OutputTokens: 340, CacheReadInputTokens: 50}
+	want := `
+# HELP vulnwatch_triage_requests Claude triage requests that got a response in the last run, by model.
+# TYPE vulnwatch_triage_requests gauge
+vulnwatch_triage_requests{model="claude-test"} 3
+# HELP vulnwatch_triage_tokens Tokens the Claude triage used in the last run, by model and type (input, output, cache_creation, cache_read).
+# TYPE vulnwatch_triage_tokens gauge
+vulnwatch_triage_tokens{model="claude-test",type="cache_creation"} 0
+vulnwatch_triage_tokens{model="claude-test",type="cache_read"} 50
+vulnwatch_triage_tokens{model="claude-test",type="input"} 1200
+vulnwatch_triage_tokens{model="claude-test",type="output"} 340
+`
+	if err := testutil.GatherAndCompare(Registry(Run{Mode: "run", Report: &rep}), strings.NewReader(want), "vulnwatch_triage_requests", "vulnwatch_triage_tokens"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRegistryFailedRun(t *testing.T) {
 	now := time.Now()
 	reg := Registry(Run{Mode: "run", Err: errors.New("boom"), Products: products(t), Start: now, End: now})
