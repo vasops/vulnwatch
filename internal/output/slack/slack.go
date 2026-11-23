@@ -88,10 +88,7 @@ func (o *Output) Render(ctx context.Context, r report.Report) error {
 		}
 		dash := o.dashboardLink(rt.tenant)
 		alerts := p1Alerts(sub)
-		p1 := 0
-		for _, a := range alerts {
-			p1 += a.count
-		}
+		p1 := p1Total(alerts)
 		if err := o.post(ctx, rt.channel, summaryText(sub), summaryBlocks(sub, rt.title, dash, p1, rt.alert, failed, o.maxText())); err != nil {
 			errs = append(errs, fmt.Errorf("slack summary %s: %w", rt.channel, err))
 		} else {
@@ -106,7 +103,11 @@ func (o *Output) Render(ctx context.Context, r report.Report) error {
 				}
 				continue
 			}
-			logx.Audit(ctx, o.log, "slack message posted", "kind", "p1_alert", "channel", rt.alert, "id", a.id, "text", a.text)
+			attrs := []any{"kind", "p1_alert", "channel", rt.alert, "id", a.id, "text", a.text}
+			if len(a.scopes) > 0 {
+				attrs = append(attrs, "scopes", report.ScopeList(a.scopes))
+			}
+			logx.Audit(ctx, o.log, "slack message posted", attrs...)
 		}
 	}
 	if err := ctx.Err(); err != nil && !slices.ContainsFunc(errs, func(e error) bool { return errors.Is(e, err) }) {
@@ -231,13 +232,22 @@ var prioEmoji = map[string]string{"P1": ":red_circle:", "P2": ":large_orange_cir
 // summaryText is the notification / fallback text.
 func summaryText(r report.Report) string {
 	text := "vulnwatch: no new vulnerabilities"
-	if !r.Empty() {
-		text = fmt.Sprintf("vulnwatch: %d new or updated %s", r.Total(), plural(r.Total(), "vulnerability", "vulnerabilities"))
+	if c := report.Count(report.Findings(r.Items())); c.Findings > 0 {
+		text = fmt.Sprintf("vulnwatch: %d new or updated %s%s", c.Findings, plural(c.Findings, "vulnerability", "vulnerabilities"), inEnvironments(c.Findings, c.Scopes))
 	}
 	if n := sum(r.CurrentOpenCounts()); n > 0 {
 		text += fmt.Sprintf(", %d open", n)
 	}
 	return text
+}
+
+// inEnvironments is " in M environments" when the findings span more
+// environments than there are findings (N findings, M environments), else "".
+func inEnvironments(findings, scopes int) string {
+	if scopes > findings {
+		return fmt.Sprintf(" in %d environments", scopes)
+	}
+	return ""
 }
 
 func sum(cs []report.PriorityCount) int {
@@ -248,26 +258,27 @@ func sum(cs []report.PriorityCount) int {
 	return n
 }
 
-// summaryBlocks is the per-run message: status, counts and where to look.
-// failed names the sources that failed in the run (for every route; the
-// warning count only where the run's warnings are kept).
-// The section stays within maxText: findings that don't fit are dropped
-// whole and counted in the "+N more" line.
-func summaryBlocks(r report.Report, scopes, dash string, alerts int, alertChannel string, failed []string, maxText int) []slack.Block {
+// summaryBlocks is the per-run message: counts, one section per finding and
+// where to look. failed names the sources that failed in the run (for every
+// route; the warning count only where the run's warnings are kept).
+// A section per finding keeps a long one from pushing out the others.
+func summaryBlocks(r report.Report, scopes, dash string, p1 p1Count, alertChannel string, failed []string, maxText int) []slack.Block {
 	title := ":shield: vulnwatch report" + scopes + " · " + r.Until.Format("2 Jan 2006")
 	if r.Mode != report.ModeRun {
 		title += " (" + r.Mode + ")"
 	}
 	var head, tail []string
-	if alerts > 0 {
-		head = append(head, fmt.Sprintf(":rotating_light: *%d critical (P1) %s*, see <#%s>", alerts, plural(alerts, "finding", "findings"), alertChannel))
+	if p1.findings > 0 {
+		head = append(head, fmt.Sprintf(":rotating_light: *%d critical (P1) %s%s*, see <#%s>", p1.findings, plural(p1.findings, "finding", "findings"), inEnvironments(p1.findings, p1.scopes), alertChannel))
 	}
 	if n := r.TriageFailures; n > 0 { // run-wide: on every route
 		head = append(head, fmt.Sprintf(":warning: Claude triage failed %d %s; priorities are rule-based", n, plural(n, "time", "times")))
 	}
+	findings := report.Findings(r.Items())
+	counts := report.Count(findings)
 	newLine := "*New:* none"
-	if !r.Empty() {
-		newLine = fmt.Sprintf("*New:* %d   %s", r.Total(), countLine(r.Counts))
+	if counts.Findings > 0 {
+		newLine = fmt.Sprintf("*New:* %d%s   %s", counts.Findings, inEnvironments(counts.Findings, counts.Scopes), countLine(counts.ByPriority))
 	}
 	head = append(head, newLine)
 	// Open counts like the findings_open metric: listed now plus still open.
@@ -290,115 +301,131 @@ func summaryBlocks(r report.Report, scopes, dash string, alerts int, alertChanne
 		}
 		ctx = append(ctx, note)
 	}
-	return []slack.Block{
+	blocks := []slack.Block{
 		slack.NewHeaderBlock(plain(textx.Truncate(title, maxHeaderText))),
-		slack.NewSectionBlock(mrkdwn(fitSummary(head, groupItems(r.Items()), tail, maxText)), nil, nil),
+		slack.NewSectionBlock(mrkdwn(truncate(strings.Join(head, "\n"), maxText)), nil, nil),
+	}
+	for _, f := range findings[:min(len(findings), maxSummaryItems)] {
+		blocks = append(blocks, slack.NewSectionBlock(mrkdwn(summaryEntry(f, maxText)), nil, nil))
+	}
+	if len(findings) > maxSummaryItems {
+		blocks = append(blocks, slack.NewSectionBlock(mrkdwn(fmt.Sprintf("_+%d more on the dashboard_", len(findings)-maxSummaryItems)), nil, nil))
+	}
+	return append(blocks,
+		slack.NewSectionBlock(mrkdwn(truncate(strings.Join(tail, "\n"), maxText)), nil, nil),
 		slack.NewContextBlock("", mrkdwn(strings.Join(ctx, "  ·  "))),
-	}
+	)
 }
 
-// maxSummaryItems is how many new findings the summary lists.
-const maxSummaryItems = 10
+const (
+	// maxSummaryItems is how many new findings the summary lists.
+	maxSummaryItems = 10
+	// maxEntryTitle and maxEntryAction cut a finding's title and action in
+	// the summary.
+	maxEntryTitle  = 500
+	maxEntryAction = 500
+	// scopeIndent starts the action and scope lines under a finding's first line.
+	scopeIndent = "      "
+)
 
-// fitSummary joins the head lines, the new and updated findings (most
-// urgent first: priority, product and version, the advisory, then the
-// action) and the tail lines. It lists as many findings as fit in maxText
-// runes, at most maxSummaryItems, dropping whole findings (never cutting
-// inside link markup); the rest are counted in a "+N more" line.
-func fitSummary(head []string, groups []*itemGroup, tail []string, maxText int) string {
-	var text string
-	for k := min(len(groups), maxSummaryItems); k >= 0; k-- {
-		lines := slices.Clone(head)
-		for _, g := range groups[:k] {
-			lines = append(lines, g.lines()...)
-		}
-		if k < len(groups) {
-			lines = append(lines, fmt.Sprintf("      _+%d more on the dashboard_", len(groups)-k))
-		}
-		text = strings.Join(append(lines, tail...), "\n")
-		if utf8.RuneCountInString(text) <= maxText {
-			return text
-		}
-	}
-	return truncate(text, maxText) // head and tail alone are too long
-}
-
-// itemGroup is one finding as listed in the summary, with every scope
-// (tenant environment) it was reported for.
-type itemGroup struct {
-	report.Item
-	scopes [][2]string // tenant, environment
-}
-
-// groupItems merges items that differ only in their scope, keeping the
-// report order (by first appearance).
-func groupItems(items []report.Item) []*itemGroup {
-	type key struct{ product, constraint, id, priority, change, action string }
-	idx := map[key]*itemGroup{}
-	var out []*itemGroup
-	for _, it := range items {
-		k := key{it.Product, it.Constraint, it.ID, it.Priority, it.Change, it.Action}
-		g := idx[k]
-		if g == nil {
-			g = &itemGroup{Item: it}
-			idx[k] = g
-			out = append(out, g)
-		}
-		if it.Scope != "" {
-			g.scopes = append(g.scopes, [2]string{it.Tenant, it.Environment})
-		}
-	}
-	return out
-}
-
-// lines renders the group: the finding, then its action.
-func (g *itemGroup) lines() []string {
-	it := g.Item
+// summaryEntry is one finding as listed in the summary: priority, name and
+// ID, the advisory title, the action, and one line per affected line (who,
+// which version). It stays within maxText runes: scope lines that do not fit
+// are replaced by "+N more environments".
+func summaryEntry(f report.Finding[report.Item], maxText int) string {
+	it := f.Representative
 	link := ""
 	for _, a := range it.Advisories {
 		link = a.URL
 		break
 	}
 	link = cmpOr(link, first(it.Links))
-	name := "*" + escape(it.Product) + "*"
-	switch {
-	case len(g.scopes) == 1:
-		name = "*" + escape(report.Named(it.Scope, it.Product)) + "*"
-	case len(g.scopes) > 1:
-		name += " (" + escape(scopeList(g.scopes)) + ")"
-	}
-	line := fmt.Sprintf("%s %s `%s` · %s", prioEmoji[it.Priority], name, escape(versions(it.Constraint)), idLink(it.ID, it.Title, link))
+	id := idLink(it.ID, it.Title, link)
+	title := ""
 	if it.Title != "" && report.Label(it.ID, it.Title) == it.ID {
-		line += " " + escape(textx.Truncate(it.Title, 90))
+		title = escape(textx.Truncate(it.Title, min(maxEntryTitle, maxText/3)))
 	}
-	if it.Change != "new" {
-		line += " _(updated: " + escape(textx.Truncate(it.Change, 60)) + ")_"
+	var head []string
+	var lines []report.Line
+	switch {
+	case len(f.Lines) == 0 || len(f.Scopes) == 1 && len(f.Lines) == 1:
+		// One line, title after the ID.
+		name, constraint := it.Product, it.Constraint
+		if len(f.Lines) == 1 {
+			name, constraint = report.Named(it.Scope, it.Product), f.Lines[0].Constraint
+		}
+		line := fmt.Sprintf("%s *%s* `%s` · %s", prioEmoji[f.Priority], escape(name), escape(versions(constraint)), id)
+		if title != "" {
+			line += " " + title
+		}
+		head = []string{line + changeNote(cmp.Or(f.Change, it.Change))}
+	default:
+		// The title gets its own line, the versions go on the scope lines.
+		head = []string{prioEmoji[f.Priority] + " *" + escape(it.Product) + "* · " + id + changeNote(f.Change)}
+		if title != "" {
+			head = append(head, title)
+		}
+		lines = f.Lines
 	}
-	out := []string{line}
-	if it.Action != "" {
-		out = append(out, "      ↳ "+escape(textx.Truncate(it.Action, 160)))
+	if f.Action != "" {
+		head = append(head, scopeIndent+"↳ "+escape(textx.Truncate(f.Action, min(maxEntryAction, maxText/3))))
 	}
-	return out
+	out := fitLines(head, lines, func(l report.Line) string { return affectedLine(l, f, scopeIndent+"• ") }, scopeIndent, maxText)
+	return truncate(strings.Join(out, "\n"), maxText)
 }
 
-// scopeList names tenant environments compactly, tenants in order of
-// appearance: "acme: prod, stage; beta: prod".
-func scopeList(scopes [][2]string) string {
-	var tenants []string
-	envs := map[string][]string{}
-	for _, s := range scopes {
-		if _, ok := envs[s[0]]; !ok {
-			tenants = append(tenants, s[0])
+// changeNote is " _(updated: ...)_" for a change other than "new", escaped.
+func changeNote(change string) string {
+	if change == "" || change == "new" {
+		return ""
+	}
+	return " _(updated: " + escape(textx.Truncate(change, 60)) + ")_"
+}
+
+// affectedLine is one affected line: who, which version. A line below the
+// finding's priority leads with its own emoji; a line carries its own change
+// when the finding's scopes differ in it.
+func affectedLine[T any](l report.Line, f report.Finding[T], bullet string) string {
+	s := bullet
+	if e := prioEmoji[l.Priority]; l.Priority != f.Priority && e != "" {
+		s += e + " "
+	}
+	s += escape(l.Names()) + " · `" + escape(versions(l.Constraint)) + "`"
+	if f.Change == "" {
+		s += changeNote(l.Change)
+	}
+	return s
+}
+
+// fitLines appends the rendered lines to head while the whole stays within
+// budget runes, replacing the rest by one "+N more environments" line.
+func fitLines(head []string, lines []report.Line, render func(report.Line) string, indent string, budget int) []string {
+	rendered := make([]string, len(lines))
+	for i, l := range lines {
+		rendered[i] = render(l)
+	}
+	for k := len(lines); ; k-- {
+		out := append(slices.Clone(head), rendered[:k]...)
+		if k < len(lines) {
+			n := distinctScopes(lines[k:])
+			out = append(out, fmt.Sprintf("%s_+%d more %s_", indent, n, plural(n, "environment", "environments")))
 		}
-		if !slices.Contains(envs[s[0]], s[1]) {
-			envs[s[0]] = append(envs[s[0]], s[1])
+		if k == 0 || utf8.RuneCountInString(strings.Join(out, "\n")) <= budget {
+			return out
 		}
 	}
-	parts := make([]string, len(tenants))
-	for i, t := range tenants {
-		parts[i] = t + ": " + strings.Join(envs[t], ", ")
+}
+
+func distinctScopes(lines []report.Line) int {
+	var seen []report.ScopeRef
+	for _, l := range lines {
+		for _, s := range l.Scopes {
+			if !slices.Contains(seen, s) {
+				seen = append(seen, s)
+			}
+		}
 	}
-	return strings.Join(parts, "; ")
+	return len(seen)
 }
 
 func cmpOr(a, b string) string {
@@ -423,8 +450,27 @@ func countLine(cs []report.PriorityCount) string {
 // a full-history check; or one card listing many found by the check.
 type alert struct {
 	id, text string
-	count    int // P1 findings on the card
+	count    int               // P1 findings on the card
+	scopes   []report.ScopeRef // the tenant environments they were found in
 	blocks   func(dash string, maxText int) []slack.Block
+}
+
+// p1Count is the P1 findings of a route and the environments they span.
+type p1Count struct{ findings, scopes int }
+
+func p1Total(alerts []alert) p1Count {
+	var c p1Count
+	var seen []report.ScopeRef
+	for _, a := range alerts {
+		c.findings += a.count
+		for _, s := range a.scopes {
+			if !slices.Contains(seen, s) {
+				seen = append(seen, s)
+			}
+		}
+	}
+	c.scopes = len(seen)
+	return c
 }
 
 // maxHistoryCards is how many P1 findings of a full-history check get a card
@@ -432,54 +478,100 @@ type alert struct {
 // New and updated P1 findings always get their own card.
 const maxHistoryCards = 5
 
+// p1Alerts is one card per P1 finding of the route, not one per scope: the
+// scopes where the finding is P1 are its affected lines.
 func p1Alerts(r report.Report) []alert {
 	var out []alert
+	var p1 []report.Item
 	for _, it := range r.Items() {
-		if it.Priority != "P1" {
-			continue
+		if it.Priority == "P1" {
+			p1 = append(p1, it)
 		}
-		it := it
-		label := report.Label(it.ID, it.Title)
+	}
+	for _, f := range report.Findings(p1) {
+		it := f.Representative
+		name, affected, envs := cardScope(f, it.Scope, it.Product)
 		out = append(out, alert{
-			id:    it.ID,
-			text:  "P1: " + report.Named(it.Scope, it.Product) + " " + label,
-			count: 1,
+			id:     it.ID,
+			text:   "P1: " + name + " " + report.Label(it.ID, it.Title) + environmentCount(envs, " (", ")"),
+			count:  1,
+			scopes: f.Scopes,
 			blocks: func(dash string, maxText int) []slack.Block {
 				note := "new"
-				if it.Change != "new" {
-					note = "updated: " + it.Change // escaped with the context line
+				switch {
+				case f.Change == "":
+					note = "updated: the change differs per environment, see Affected"
+				case f.Change != "new":
+					note = "updated: " + f.Change // escaped with the context line
 				}
 				return alertCard(card{
-					id: it.ID, title: it.Title, link: first(it.Links), advisories: it.Advisories, product: report.Named(it.Scope, it.Product), constraint: it.Constraint,
-					summary: it.Summary, action: it.Action, severity: it.Severity, cvss: it.CVSS, kev: it.KEV, epss: it.EPSS,
+					id: it.ID, title: it.Title, link: first(it.Links), advisories: it.Advisories, product: name, constraint: it.Constraint,
+					summary: it.Summary, action: f.Action, severity: it.Severity, cvss: it.CVSS, kev: it.KEV, epss: it.EPSS,
 					redHat: it.RedHatSeverity, redHatStatement: it.RedHatStatement,
 					fixed: it.Fixed, match: it.Match, noData: it.NoVersionData, note: note,
 					packages: it.Packages, imageOnly: it.ImageOnly,
+					affected: affected, environments: envs,
 				}, dash, maxText)
 			},
 		})
 	}
 	history := slices.DeleteFunc(slices.Clone(r.Open), func(it report.OpenItem) bool { return it.Priority != "P1" || !it.FirstSeen })
-	if len(history) > maxHistoryCards {
-		return append(out, historyAlert(history))
+	findings := report.OpenFindings(history, historyAction)
+	if len(findings) > maxHistoryCards {
+		return append(out, historyAlert(findings))
 	}
-	for _, it := range history {
+	for _, f := range findings {
+		it := f.Representative
+		name, affected, envs := cardScope(f, it.Scope, it.Product)
 		out = append(out, alert{
-			id:    it.ID,
-			text:  "P1: " + report.Named(it.Scope, it.Product) + " " + report.Label(it.ID, it.Title),
-			count: 1,
+			id:     it.ID,
+			text:   "P1: " + name + " " + report.Label(it.ID, it.Title) + environmentCount(envs, " (", ")"),
+			count:  1,
+			scopes: f.Scopes,
 			blocks: func(dash string, maxText int) []slack.Block {
 				return alertCard(card{
-					id: it.ID, title: it.Title, link: it.Link, advisories: it.Advisories, product: report.Named(it.Scope, it.Product), constraint: it.Constraint,
-					summary: it.Summary, action: historyAction(it), severity: it.Severity, cvss: it.CVSS, kev: it.KEV, epss: it.EPSS,
+					id: it.ID, title: it.Title, link: it.Link, advisories: it.Advisories, product: name, constraint: it.Constraint,
+					summary: it.Summary, action: f.Action, severity: it.Severity, cvss: it.CVSS, kev: it.KEV, epss: it.EPSS,
 					fixed: it.Fixed, match: it.Match, noData: it.NoVersionData,
 					packages: it.Packages, imageOnly: it.ImageOnly,
-					note: "found by the full-history check: this advisory is older, but the version we run is affected",
+					note:     "found by the full-history check: this advisory is older, but the version we run is affected",
+					affected: affected, environments: envs,
 				}, dash, maxText)
 			},
 		})
 	}
 	return out
+}
+
+// cardScope names what a card shows of the finding's scopes. One scope on
+// one line keeps the scoped product name and the version fields; otherwise
+// the product is bare and the card lists the affected lines.
+func cardScope[T any](f report.Finding[T], scope, product string) (name, affected string, environments int) {
+	if len(f.Scopes) == 1 && len(f.Lines) == 1 {
+		return report.Named(scope, product), "", 0
+	}
+	return product, affectedList(f), len(f.Scopes)
+}
+
+// environmentCount is "<before>N environments<after>" when N > 1, else "".
+func environmentCount(n int, before, after string) string {
+	if n > 1 {
+		return fmt.Sprintf("%s%d environments%s", before, n, after)
+	}
+	return ""
+}
+
+// maxAffectedText keeps the Affected field of a card within Slack's 2000
+// characters for a field.
+const maxAffectedText = 1900
+
+// affectedList is the card's Affected field: one line per affected line,
+// "" for a finding without tenants (the card then shows our version).
+func affectedList[T any](f report.Finding[T]) string {
+	if len(f.Lines) == 0 {
+		return ""
+	}
+	return strings.Join(fitLines(nil, f.Lines, func(l report.Line) string { return affectedLine(l, f, "• ") }, "", maxAffectedText), "\n")
 }
 
 // historyAction is Claude's action, else a generic one from the fixes.
@@ -493,59 +585,56 @@ func historyAction(it report.OpenItem) string {
 	return "No fix released yet: check the advisory for mitigations."
 }
 
+// maxHistoryEntryText keeps one finding's scope lines on the history card
+// from taking the room of the others.
+const maxHistoryEntryText = 600
+
 // historyAlert is one card for many P1 findings of full-history checks:
-// one line per advisory and product (ID, product, scopes, version,
-// action), as many as fit, the rest counted.
-func historyAlert(items []report.OpenItem) alert {
-	type key struct{ id, product, constraint, action string }
-	type group struct {
-		it     report.OpenItem
-		scopes [][2]string
-	}
-	idx := map[key]*group{}
-	var groups []*group
-	for _, it := range items {
-		k := key{it.ID, it.Product, it.Constraint, historyAction(it)}
-		g := idx[k]
-		if g == nil {
-			g = &group{it: it}
-			idx[k] = g
-			groups = append(groups, g)
-		}
-		if it.Scope != "" {
-			g.scopes = append(g.scopes, [2]string{it.Tenant, it.Environment})
+// one entry per finding (ID, product, action) with its affected lines, as
+// many as fit, the rest counted.
+func historyAlert(findings []report.Finding[report.OpenItem]) alert {
+	n := len(findings)
+	var scopes []report.ScopeRef
+	for _, f := range findings {
+		for _, s := range f.Scopes {
+			if !slices.Contains(scopes, s) {
+				scopes = append(scopes, s)
+			}
 		}
 	}
-	n := len(items)
 	what := fmt.Sprintf("%d P1 findings from the full-history check", n)
 	return alert{
-		id:    "full-history",
-		text:  "P1: " + what,
-		count: n,
+		id:     "full-history",
+		text:   "P1: " + what,
+		count:  n,
+		scopes: scopes,
 		blocks: func(dash string, maxText int) []slack.Block {
 			head := []string{"These advisories are older, but the versions we run are affected. Listed on one card instead of one card each."}
 			var lines [][]string
-			for _, g := range groups {
-				it := g.it
+			for _, f := range findings {
+				it := f.Representative
 				link := it.Link
 				if len(it.Advisories) > 0 {
 					link = it.Advisories[0].URL
-				}
-				name := "*" + escape(it.Product) + "*"
-				switch {
-				case len(g.scopes) == 1:
-					name = "*" + escape(report.Named(it.Scope, it.Product)) + "*"
-				case len(g.scopes) > 1:
-					name += " (" + escape(scopeList(g.scopes)) + ")"
 				}
 				exploit := ""
 				if it.KEV {
 					exploit = " · :warning: KEV"
 				}
-				lines = append(lines, []string{
-					fmt.Sprintf("%s %s · %s `%s`%s", prioEmoji["P1"], idLink(it.ID, it.Title, link), name, escape(versions(it.Constraint)), exploit),
-					"      ↳ " + escape(textx.Truncate(historyAction(it), 160)),
-				})
+				var head1 string
+				var scoped []report.Line
+				if len(f.Lines) == 0 || len(f.Scopes) == 1 && len(f.Lines) == 1 {
+					name, constraint := it.Product, it.Constraint
+					if len(f.Lines) == 1 {
+						name, constraint = report.Named(it.Scope, it.Product), f.Lines[0].Constraint
+					}
+					head1 = fmt.Sprintf("%s %s · *%s* `%s`%s", prioEmoji["P1"], idLink(it.ID, it.Title, link), escape(name), escape(versions(constraint)), exploit)
+				} else {
+					head1 = fmt.Sprintf("%s %s · *%s*%s", prioEmoji["P1"], idLink(it.ID, it.Title, link), escape(it.Product), exploit)
+					scoped = f.Lines
+				}
+				entry := []string{head1, scopeIndent + "↳ " + escape(textx.Truncate(f.Action, 160))}
+				lines = append(lines, fitLines(entry, scoped, func(l report.Line) string { return affectedLine(l, f, scopeIndent+"• ") }, scopeIndent, maxHistoryEntryText))
 			}
 			var text string
 			for k := len(lines); k >= 0; k-- {
@@ -584,14 +673,19 @@ type card struct {
 	note                                 string
 	packages                             []finding.Package
 	imageOnly                            bool
+	affected                             string // the Affected list; empty without tenants
+	environments                         int
 }
 
 // alertCard renders one critical finding: what, where, how bad, what to do.
 func alertCard(c card, dash string, maxText int) []slack.Block {
-	header := ":rotating_light: P1 · " + c.product + " · " + report.Label(c.id, c.title)
+	header := ":rotating_light: P1 · " + c.product + " · " + report.Label(c.id, c.title) + environmentCount(c.environments, " · ", "")
 
 	var text strings.Builder
-	fmt.Fprintf(&text, "%s  ·  *%s* `%s`", idLinks(c), escape(c.product), escape(versions(c.constraint)))
+	fmt.Fprintf(&text, "%s  ·  *%s*", idLinks(c), escape(c.product))
+	if c.affected == "" { // with an Affected list the versions are on its lines
+		fmt.Fprintf(&text, " `%s`", escape(versions(c.constraint)))
+	}
 	if c.title != "" && report.Label(c.id, c.title) == c.id {
 		text.WriteString("\n*" + escape(c.title) + "*")
 	}
@@ -640,7 +734,11 @@ func alertCard(c card, dash string, maxText int) []slack.Block {
 		mrkdwn("*Severity*\n" + sev),
 		mrkdwn("*Fixed in*\n" + escape(textx.Truncate(fixed, 500))), // a field holds 2000
 		mrkdwn("*Exploitation*\n" + strings.Join(exploit, "\n")),
-		mrkdwn("*Our version*\n" + matchLabel(c.match, c.noData)),
+	}
+	if c.affected != "" {
+		fields = append(fields, mrkdwn("*Affected*\n"+c.affected))
+	} else {
+		fields = append(fields, mrkdwn("*Our version*\n"+matchLabel(c.match, c.noData)))
 	}
 	ctx := []string{escape(c.note)}
 	if dash != "" {
