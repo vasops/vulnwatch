@@ -48,6 +48,7 @@ func newRunCmd(a *app) *cobra.Command {
 	var (
 		of       outputFlags
 		dryRun   bool
+		weekly   bool
 		since    string
 		products []string
 	)
@@ -64,13 +65,14 @@ func newRunCmd(a *app) *cobra.Command {
 				}
 				sinceT = &t
 			}
-			return a.runPipeline(cmd.Context(), runParams{of: of, dryRun: dryRun, since: sinceT, products: products})
+			return a.runPipeline(cmd.Context(), runParams{of: of, dryRun: dryRun, since: sinceT, products: products, weekly: weekly})
 		},
 	}
 	of.register(cmd)
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "no state writes and no Slack; local outputs still render")
 	cmd.Flags().StringVar(&since, "since", "", "override the window start (YYYY-MM-DD or RFC3339)")
 	cmd.Flags().StringArrayVar(&products, "product", nil, "limit the run to a product (repeatable)")
+	cmd.Flags().BoolVar(&weekly, "weekly", false, "build the weekly report whatever the day and outputs.slack.weekly say (preview: --dry-run --output stdout)")
 	return cmd
 }
 
@@ -89,6 +91,7 @@ type runParams struct {
 	since     *time.Time
 	products  []string
 	bootstrap bool
+	weekly    bool
 }
 
 func (a *app) runPipeline(ctx context.Context, p runParams) error {
@@ -147,7 +150,7 @@ func (a *app) runPipeline(ctx context.Context, p runParams) error {
 	rep, err := pipeline.Run(ctx, pipeline.Options{
 		Config: cfg, Products: products, Sources: srcs, Enrichers: enr, Store: store,
 		Triager: triager, Outputs: outs, Log: a.log, Now: time.Now,
-		Since: p.since, DryRun: p.dryRun, Bootstrap: p.bootstrap, WholeStack: len(p.products) == 0,
+		Since: p.since, DryRun: p.dryRun, Bootstrap: p.bootstrap, WholeStack: len(p.products) == 0, Weekly: p.weekly,
 	})
 	a.emitMetrics(context.WithoutCancel(ctx), cfg, p, client, store, metrics.Run{
 		Report: rep, Products: products, Err: err, Start: start, End: time.Now(),
