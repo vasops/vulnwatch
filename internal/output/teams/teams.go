@@ -1,8 +1,6 @@
 // Package teams POSTs an Adaptive Card to a Microsoft Teams Workflows
-// webhook: one run summary, and one card per P1 finding, mirroring
-// internal/output/webhook. Adaptive Card is the format Microsoft points new
-// integrations at; the legacy format a Workflows webhook still accepts
-// cannot render buttons.
+// webhook: one run summary, and one card per P1 finding. The legacy format
+// a Workflows webhook still accepts cannot render buttons.
 package teams
 
 import (
@@ -34,15 +32,12 @@ type Output struct {
 type Settings struct {
 	URL      string
 	AlertURL string // falls back to URL
-	// DryRun makes Render validate the config (New still fails on a missing
-	// main URL) but skip every POST: no real channel sees a dry run,
-	// matching --dry-run's "no state writes and no Slack".
+	// DryRun skips every POST: no real channel sees a dry run.
 	DryRun bool
 }
 
 func New(cfg config.TeamsOutput, s Settings, client *httpx.Client, log *slog.Logger) (*Output, error) {
-	// cmp.Or names the YAML key when the config left the env var out: the
-	// error has to say what to fix even then.
+	// cmp.Or names the YAML key when the config left the env var out.
 	if s.URL == "" {
 		return nil, fmt.Errorf("teams output needs %s", cmp.Or(cfg.URLEnv, "a url_env in outputs.teams"))
 	}
@@ -51,11 +46,10 @@ func New(cfg config.TeamsOutput, s Settings, client *httpx.Client, log *slog.Log
 
 func (o *Output) Name() string { return "teams" }
 
-// Render POSTs the run summary Adaptive Card to the main URL, then one
-// card per P1 finding to the alert URL (falling back to the main
-// URL). Every post is attempted even when another failed; any failure fails
-// the whole run, so the state is not written and the next run posts
-// everything again (at-least-once), mirroring webhook.Output.Render.
+// Render POSTs the summary to the main URL, then one card per P1 finding to
+// the alert URL (else the main URL). Every post is attempted even when
+// another failed; any failure fails the run, so the state is not written and
+// the next run posts everything again (at-least-once).
 func (o *Output) Render(ctx context.Context, r report.Report) error {
 	if o.dryRun {
 		logx.Audit(ctx, o.log, "dry run: teams output skipped")
@@ -74,15 +68,17 @@ func (o *Output) Render(ctx context.Context, r report.Report) error {
 			errs = append(errs, fmt.Errorf("teams P1 %s: %w", it.ID, err))
 			continue
 		}
-		logx.Audit(ctx, o.log, "teams card posted", "kind", "p1_alert", "url", httpx.RedactURL(alertURL), "id", it.ID)
+		attrs := []any{"kind", "p1_alert", "url", httpx.RedactURL(alertURL), "id", it.ID}
+		if it.ScopeNames != "" {
+			attrs = append(attrs, "scopes", it.ScopeNames)
+		}
+		logx.Audit(ctx, o.log, "teams card posted", attrs...)
 	}
 	return errors.Join(errs...)
 }
 
-// post marshals m and POSTs it through the shared retrying client (retry
-// on 429/5xx, TLS floor, redacted URLs); no extra headers — the Workflows
-// webhook URL itself carries the authorization. The response body is read
-// but never decoded as JSON.
+// post sends no extra headers: the Workflows webhook URL itself carries the
+// authorization. The response body is never decoded.
 func (o *Output) post(ctx context.Context, url string, m message) error {
 	b, err := json.Marshal(m)
 	if err != nil {

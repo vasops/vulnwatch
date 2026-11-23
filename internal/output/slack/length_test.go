@@ -8,6 +8,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/slack-go/slack"
+
 	"github.com/vasops/vulnwatch/internal/catalog"
 	"github.com/vasops/vulnwatch/internal/finding"
 	"github.com/vasops/vulnwatch/internal/match"
@@ -16,8 +18,8 @@ import (
 )
 
 // Slack rejects a section over 3000 characters (invalid_blocks), and the
-// run then repeats the rejected post every day (#4). Long findings are
-// dropped whole and counted in "+N more".
+// run then repeats the rejected post every day (#4). Every finding is its
+// own section, ten at most, the rest counted in "+N more".
 func TestSummaryFitsSlackSectionLimit(t *testing.T) {
 	srv, msgs := fakeSlack(t, false)
 	defer srv.Close()
@@ -41,26 +43,38 @@ func TestSummaryFitsSlackSectionLimit(t *testing.T) {
 	if err := o.Render(context.Background(), rep); err != nil {
 		t.Fatal(err)
 	}
-	section := (*msgs)[0].Blocks[1]["text"].(map[string]any)["text"].(string)
-	if n := utf8.RuneCountInString(section); n > maxSectionText {
-		t.Fatalf("section is %d characters", n)
+	blocks := (*msgs)[0].Blocks
+	// header, counts, ten findings, "+2 more", tail, context
+	if len(blocks) != 15 {
+		t.Fatalf("%d blocks", len(blocks))
 	}
-	listed := strings.Count(section, "*<https://example.invalid/advisories/")
-	if listed == 0 || listed >= maxSummaryItems {
-		t.Fatalf("listed %d findings:\n%s", listed, section)
-	}
-	for _, want := range []string{fmt.Sprintf("_+%d more on the dashboard_", 12-listed), "*Open:* 12 (new 12)", "|:bar_chart: Open the dashboard>"} {
-		if !strings.Contains(section, want) {
-			t.Errorf("section lacks %q:\n%s", want, section)
+	var all []string
+	for _, b := range blocks[1:] {
+		if txt, ok := b["text"].(map[string]any); ok {
+			section := txt["text"].(string)
+			if n := utf8.RuneCountInString(section); n > maxSectionText {
+				t.Fatalf("section is %d characters", n)
+			}
+			if strings.Count(section, "<") != strings.Count(section, ">") {
+				t.Errorf("unbalanced link markup:\n%s", section)
+			}
+			all = append(all, section)
 		}
 	}
-	if strings.Count(section, "<") != strings.Count(section, ">") {
-		t.Errorf("unbalanced link markup:\n%s", section)
+	text := strings.Join(all, "\n")
+	if n := strings.Count(text, "*<https://example.invalid/advisories/"); n != maxSummaryItems {
+		t.Errorf("listed %d findings:\n%s", n, text)
+	}
+	for _, want := range []string{"_+2 more on the dashboard_", "*Open:* 12 (new 12)", "|:bar_chart: Open the dashboard>"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("summary lacks %q:\n%s", want, text)
+		}
 	}
 
 	// A low max_section_text is honored too.
-	text := fitSummary([]string{"*New:* 12"}, groupItems(rep.Items()), []string{"*Open:* 12"}, 500)
-	if utf8.RuneCountInString(text) > 500 || !strings.Contains(text, "*Open:* 12") || !strings.Contains(text, "more on the dashboard") {
-		t.Fatalf("fit 500:\n%s", text)
+	for _, b := range summaryBlocks(rep, "", "", p1Count{}, "CALERT", nil, 500) {
+		if sec, ok := b.(*slack.SectionBlock); ok && utf8.RuneCountInString(sec.Text.Text) > 500 {
+			t.Errorf("section over 500:\n%s", sec.Text.Text)
+		}
 	}
 }

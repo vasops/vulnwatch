@@ -38,26 +38,27 @@ func TestManyHistoryP1sShareOneCard(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := *msgs
-	// Summary, the new P1's own card, one card for the 7 history P1s.
+	// Summary, the new P1's own card, one card for the 6 history findings.
 	if len(m) != 3 {
 		t.Fatalf("%d messages", len(m))
 	}
-	if sum := blockText(m[0].Blocks); !strings.Contains(sum, ":rotating_light: *8 critical (P1) findings*") {
+	// The new P1 and the six history findings (one is in two tenants).
+	if sum := blockText(m[0].Blocks); !strings.Contains(sum, ":rotating_light: *7 critical (P1) findings*") {
 		t.Errorf("summary:\n%s", sum)
 	}
 	if !strings.Contains(blockText(m[1].Blocks), "CVE-2026-1001") {
 		t.Errorf("new P1 card:\n%s", blockText(m[1].Blocks))
 	}
 	got := blockText(m[2].Blocks)
-	if m[2].Text != "P1: 7 P1 findings from the full-history check" || m[2].Channel != "CALERT" {
+	if m[2].Text != "P1: 6 P1 findings from the full-history check" || m[2].Channel != "CALERT" {
 		t.Errorf("grouped card: %q to %s", m[2].Text, m[2].Channel)
 	}
 	for _, want := range []string{
-		":rotating_light: 7 P1 findings from the full-history check",
+		":rotating_light: 6 P1 findings from the full-history check",
 		":red_circle: *CVE-2024-0000* · *keycloak* `26.x` · :warning: KEV",
 		"      ↳ Upgrade to a fixed version: 26.0.9.",
 		":red_circle: *CVE-2024-0004* · *keycloak* `26.x`",
-		":red_circle: *CVE-2024-0005* · *keycloak* (acme: prod; beta: prod) `26.x`",
+		":red_circle: *CVE-2024-0005* · *keycloak*\n      ↳ Upgrade to a fixed version: 26.0.9.\n      • acme: prod; beta: prod · `26.x`",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("grouped card lacks %q:\n%s", want, got)

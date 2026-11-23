@@ -70,7 +70,8 @@ func TestRenderRoutesTenants(t *testing.T) {
 	}
 }
 
-// The same finding in five tenant environments is one summary line (#23).
+// The same finding in five tenant environments is one summary entry (#23),
+// even when one of them has another action.
 func TestSummaryGroupsScopesOfOneFinding(t *testing.T) {
 	srv, msgs := fakeSlack(t, false)
 	defer srv.Close()
@@ -79,32 +80,34 @@ func TestSummaryGroupsScopesOfOneFinding(t *testing.T) {
 	c, _ := match.ParseConstraint("26.7.0")
 	var ps []catalog.Product
 	var es []report.Entry
-	for _, sc := range [][2]string{{"acme", "prod"}, {"acme", "stage"}, {"beta", "prod"}, {"beta", "stage"}, {"gamma", "prod"}} {
+	for _, sc := range [][2]string{{"acme", "prod"}, {"acme", "stage"}, {"globex", "prod"}, {"globex", "stage"}, {"initech", "prod"}} {
 		p := catalog.Product{Name: "keycloak", Constraint: c, Exposure: "internet", Criticality: "high",
 			Scope: config.Scope{Tenant: sc[0], Environment: sc[1], Remote: true}}
 		ps = append(ps, p)
 		es = append(es, report.Entry{Finding: finding.Finding{ID: "CVE-2026-7", Product: p.Key(), Title: "x", Severity: "high", Match: "affected"}, Product: p,
 			Triage: triage.Result{Relevant: "yes", Priority: "P2", Method: triage.MethodRules, Action: "Upgrade to 26.7.1."}})
 	}
-	// gamma runs it with another action: its own line.
-	es[4].Triage.Action = "Upgrade gamma first."
+	es[4].Triage.Action = "Upgrade initech first."
 	now := time.Date(2026, 11, 6, 6, 0, 0, 0, time.UTC)
 	rep := report.Build(report.Meta{Mode: report.ModeRun, GeneratedAt: now, Since: now.Add(-24 * time.Hour), Until: now, Products: ps}, es)
 	if err := o.Render(context.Background(), rep); err != nil {
 		t.Fatal(err)
 	}
 	sum := blockText((*msgs)[0].Blocks)
-	if n := strings.Count(sum, "CVE-2026-7"); n != 2 {
-		t.Fatalf("want 2 lines for CVE-2026-7, got %d:\n%s", n, sum)
+	if n := strings.Count(sum, "CVE-2026-7"); n != 1 {
+		t.Fatalf("want 1 entry for CVE-2026-7, got %d:\n%s", n, sum)
 	}
 	for _, want := range []string{
-		":large_orange_circle: *keycloak* (acme: prod, stage; beta: prod, stage) `26.7.0` · *CVE-2026-7*",
-		"      ↳ Upgrade to 26.7.1.",
-		":large_orange_circle: *gamma/prod keycloak* `26.7.0` · *CVE-2026-7*",
+		":large_orange_circle: *keycloak* · *CVE-2026-7*\nx\n      ↳ Upgrade to 26.7.1.\n",
+		"      • acme: prod, stage; globex: prod, stage; initech: prod · `26.7.0`",
+		"*New:* 1 in 5 environments   :large_orange_circle: 1",
 	} {
 		if !strings.Contains(sum, want) {
 			t.Errorf("summary missing %q\n%s", want, sum)
 		}
+	}
+	if strings.Contains(sum, "initech first") {
+		t.Errorf("scope-specific action shown:\n%s", sum)
 	}
 }
 

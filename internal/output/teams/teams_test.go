@@ -1,6 +1,7 @@
 package teams
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -16,14 +17,14 @@ import (
 	"github.com/vasops/vulnwatch/internal/config"
 	"github.com/vasops/vulnwatch/internal/finding"
 	"github.com/vasops/vulnwatch/internal/httpx"
+	"github.com/vasops/vulnwatch/internal/logx"
 	"github.com/vasops/vulnwatch/internal/match"
 	"github.com/vasops/vulnwatch/internal/report"
 	"github.com/vasops/vulnwatch/internal/report/reporttest"
 	"github.com/vasops/vulnwatch/internal/triage"
 )
 
-// capture is a JSON-POST-only test double: it records every body posted to
-// it, decoded, and answers 200 with an empty body.
+// capture records every body posted to it and answers 200.
 func capture(t *testing.T) (*httptest.Server, *[]map[string]any) {
 	t.Helper()
 	var (
@@ -61,9 +62,7 @@ func newOutput(t *testing.T, url, alertURL string) *Output {
 	return o
 }
 
-// twoNonP1FindingsReport is 2 new findings, neither P1: the summary-only
-// scenario must not trigger a P1 alert post, which reporttest.Sample()
-// (carrying a P1 finding) would.
+// twoNonP1FindingsReport has no P1, so only the summary is posted.
 func twoNonP1FindingsReport() report.Report {
 	now := time.Date(2026, 10, 12, 6, 0, 0, 0, time.UTC)
 	product := func(name, constraint string) catalog.Product {
@@ -128,7 +127,7 @@ func TestRenderSendsP1ToAlertURLWithOpenUrlAction(t *testing.T) {
 	defer alert.Close()
 	o := newOutput(t, main.URL, alert.URL)
 	rep := reporttest.Sample()
-	wantLink := rep.Items()[0].Advisories[0].URL // the one new P1 finding's advisory link
+	wantLink := rep.Items()[0].Advisories[0].URL
 	if err := o.Render(context.Background(), rep); err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +151,6 @@ func TestRenderSendsP1ToAlertURLWithOpenUrlAction(t *testing.T) {
 	}
 }
 
-// adaptiveCardOf digs the Adaptive Card out of the posted envelope.
 func adaptiveCardOf(t *testing.T, posted map[string]any) map[string]any {
 	t.Helper()
 	atts, ok := posted["attachments"].([]any)
@@ -170,7 +168,6 @@ func adaptiveCardOf(t *testing.T, posted map[string]any) map[string]any {
 	return card
 }
 
-// bodyText joins the card's TextBlock texts.
 func bodyText(card map[string]any) string {
 	var b strings.Builder
 	body, _ := card["body"].([]any)
@@ -230,5 +227,78 @@ func TestRenderFailsAfterRetriesExhausted(t *testing.T) {
 	defer mu.Unlock()
 	if calls < 2 {
 		t.Fatalf("want the request retried at least once, got %d calls", calls)
+	}
+}
+
+// One finding in eight environments: one P1 POST, one audit entry with scopes.
+func TestRenderPostsOneCardPerFindingNotPerScope(t *testing.T) {
+	main, mainPosted := capture(t)
+	defer main.Close()
+	alert, alertPosted := capture(t)
+	defer alert.Close()
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: logx.LevelAudit}))
+	o, err := New(config.TeamsOutput{URLEnv: "TEAMS_URL"}, Settings{URL: main.URL, AlertURL: alert.URL}, testClient(t), log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Render(context.Background(), reportOf(eightScopes())); err != nil {
+		t.Fatal(err)
+	}
+	if len(*alertPosted) != 1 {
+		t.Fatalf("alert URL got %d posts, want 1: %+v", len(*alertPosted), *alertPosted)
+	}
+	if len(*mainPosted) != 1 {
+		t.Fatalf("main URL got %d posts, want 1 (summary)", len(*mainPosted))
+	}
+	if txt := bodyText(adaptiveCardOf(t, (*mainPosted)[0])); !strings.Contains(txt, "1 new finding(s) in 8 environments") {
+		t.Errorf("summary text = %q", txt)
+	}
+	if txt := bodyText(adaptiveCardOf(t, (*alertPosted)[0])); !strings.Contains(txt, "8 environments") {
+		t.Errorf("card heading = %q", txt)
+	}
+	out := logs.String()
+	if n := strings.Count(out, "teams card posted"); n != 2 {
+		t.Errorf("audit entries = %d, want 2 (summary and one card):\n%s", n, out)
+	}
+	if !strings.Contains(out, `scopes="acme: dev, prod; globex: test; initech: dev, stage, prod; umbrella: prod, stage"`) {
+		t.Errorf("the card's audit entry should carry the scopes:\n%s", out)
+	}
+}
+
+// Without tenants the audit entry has no scopes attribute.
+func TestRenderSingleStackAuditHasNoScopes(t *testing.T) {
+	srv, _ := capture(t)
+	defer srv.Close()
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: logx.LevelAudit}))
+	o, err := New(config.TeamsOutput{URLEnv: "TEAMS_URL"}, Settings{URL: srv.URL}, testClient(t), log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Render(context.Background(), reporttest.Sample()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(logs.String(), "scopes=") {
+		t.Errorf("no tenants, no scopes attribute:\n%s", logs.String())
+	}
+}
+
+// Full-history P1 findings in several scopes: one card each.
+func TestRenderFullHistoryP1FindingsOneCardEach(t *testing.T) {
+	srv, posted := capture(t)
+	defer srv.Close()
+	open := func(tenant, env, id string) report.OpenItem {
+		return report.OpenItem{ID: id, Product: "debian-13-kernel", Tenant: tenant, Environment: env, Scope: tenant + "/" + env, Constraint: "6.12.95", Priority: "P1", FirstSeen: true}
+	}
+	rep := reportOf(nil,
+		open("acme", "dev", "CVE-2026-0002"), open("globex", "dev", "CVE-2026-0002"),
+		open("acme", "prod", "CVE-2026-0004"), open("initech", "prod", "CVE-2026-0004"),
+	)
+	if err := newOutput(t, srv.URL, "").Render(context.Background(), rep); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(*posted); n != 3 {
+		t.Fatalf("got %d posts, want 3 (summary and one card per finding)", n)
 	}
 }

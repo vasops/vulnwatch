@@ -9,6 +9,7 @@ import (
 
 	"github.com/vasops/vulnwatch/internal/logx"
 	"github.com/vasops/vulnwatch/internal/news"
+	"github.com/vasops/vulnwatch/internal/report"
 )
 
 // maxNewsCVEs is how many CVE IDs a news message lists.
@@ -41,11 +42,11 @@ func newsBlocks(it news.Item, hits []news.Hit, maxText int) []slack.Block {
 	if len(hits) > 0 {
 		parts := make([]string, len(hits))
 		for i, h := range hits {
-			scopes := make([][2]string, len(h.Scopes))
+			scopes := make([]report.ScopeRef, len(h.Scopes))
 			for j, s := range h.Scopes {
-				scopes[j] = [2]string{s.Tenant, s.Environment}
+				scopes[j] = report.ScopeRef{Tenant: s.Tenant, Environment: s.Environment}
 			}
-			parts[i] = "*" + escape(h.Product) + "* (" + escape(scopeList(scopes)) + ")"
+			parts[i] = "*" + escape(h.Product) + "* (" + escape(report.ScopeList(scopes)) + ")"
 		}
 		lines = append(lines, ":round_pushpin: *Runs here:* "+strings.Join(parts, " · "))
 	}

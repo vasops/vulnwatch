@@ -129,6 +129,7 @@ func TestRenderSummaryAndP1Alerts(t *testing.T) {
 	}
 	m := *msgs
 	// One summary, no thread, then two P1 alerts (new finding + first seen).
+	// The summary has a section each for the counts, the two findings and the tail.
 	if len(m) != 3 {
 		t.Fatalf("got %d messages", len(m))
 	}
@@ -137,7 +138,7 @@ func TestRenderSummaryAndP1Alerts(t *testing.T) {
 			t.Fatalf("no thread replies any more: %+v", x)
 		}
 	}
-	if m[0].Channel != "CDIGEST" || m[0].Text != "vulnwatch: 2 new or updated vulnerabilities, 4 open" || len(m[0].Blocks) != 3 {
+	if m[0].Channel != "CDIGEST" || m[0].Text != "vulnwatch: 2 new or updated vulnerabilities, 4 open" || len(m[0].Blocks) != 6 {
 		t.Fatalf("summary: %+v", m[0])
 	}
 	dash := "https://grafana.example/d/vulnwatch/vulnwatch?from=now-30d&to=now"
