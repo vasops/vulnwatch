@@ -338,6 +338,9 @@ func (c *Config) Validate() error {
 			add("triage.max_tokens must be > 0")
 		}
 	}
+	if _, ok := c.Outputs.Slack.Weekly.Weekday(); c.Outputs.Slack.Weekly.Enabled && !ok {
+		add("outputs.slack.weekly.day: want one of %v, got %q", Weekdays, c.Outputs.Slack.Weekly.Day)
+	}
 	if c.Metrics.PushgatewayURL != "" {
 		if !strings.HasPrefix(c.Metrics.PushgatewayURL, "http://") && !strings.HasPrefix(c.Metrics.PushgatewayURL, "https://") {
 			add("metrics.pushgateway_url: want http(s)://…, got %q", c.Metrics.PushgatewayURL)
