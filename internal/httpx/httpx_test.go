@@ -255,3 +255,29 @@ func TestWithTimeout(t *testing.T) {
 		t.Fatal("zero keeps the client")
 	}
 }
+
+// A failed POST must not be reported as a GET: the method comes from the
+// request, and an error built without one still reads as GET.
+func TestStatusErrorNamesTheMethod(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	c := New(config.HTTP{Timeout: config.Duration(5 * time.Second)}, "1", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, srv.URL, strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = c.Do(req)
+	var se *StatusError
+	if !errors.As(err, &se) {
+		t.Fatalf("want a StatusError, got %v", err)
+	}
+	if se.Method != http.MethodPost || !strings.HasPrefix(err.Error(), "POST ") {
+		t.Errorf("error = %q, want it to start with POST", err)
+	}
+	zero := &StatusError{URL: "https://h.example", Status: 500}
+	if !strings.HasPrefix(zero.Error(), "GET ") {
+		t.Errorf("error without a method = %q, want the GET default", zero)
+	}
+}
