@@ -63,6 +63,10 @@ outputs:
     dashboard_url: ""
   pagerduty:
     routing_key_env: PAGERDUTY_ROUTING_KEY   # Events API v2 integration key
+  teams:
+    url_env: TEAMS_URL
+    alert_url_env: TEAMS_ALERT_URL   # unset: P1 alerts go to url_env's URL
+    dashboard_url: ""
 
 # ---------------------------------------------------------------------------
 # Prometheus metrics. vulnwatch is a batch job, so it pushes its metrics to a

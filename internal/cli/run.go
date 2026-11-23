@@ -19,6 +19,7 @@ import (
 	pagerdutyout "github.com/vasops/vulnwatch/internal/output/pagerduty"
 	slackout "github.com/vasops/vulnwatch/internal/output/slack"
 	"github.com/vasops/vulnwatch/internal/output/stdout"
+	teamsout "github.com/vasops/vulnwatch/internal/output/teams"
 	webhookout "github.com/vasops/vulnwatch/internal/output/webhook"
 	"github.com/vasops/vulnwatch/internal/pipeline"
 	"github.com/vasops/vulnwatch/internal/state"
@@ -26,7 +27,7 @@ import (
 	"github.com/vasops/vulnwatch/version"
 )
 
-var outputNames = []string{"stdout", "json", "html", "slack", "webhook", "pagerduty"}
+var outputNames = []string{"stdout", "json", "html", "slack", "webhook", "pagerduty", "teams"}
 
 // outputFlags are shared by run and bootstrap.
 type outputFlags struct {
@@ -37,7 +38,7 @@ type outputFlags struct {
 }
 
 func (f *outputFlags) register(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&f.outputs, "output", "stdout", "comma-separated outputs: stdout,json,html,slack,webhook,pagerduty")
+	cmd.Flags().StringVar(&f.outputs, "output", "stdout", "comma-separated outputs: stdout,json,html,slack,webhook,pagerduty,teams")
 	cmd.Flags().StringVar(&f.htmlPath, "html-path", "report.html", "target file for the html output")
 	cmd.Flags().StringVar(&f.jsonPath, "json-path", "-", "target for the json output (- = stdout)")
 	cmd.Flags().StringVar(&f.metricsFile, "metrics-file", "", "also write Prometheus metrics to this file (text format)")
@@ -247,6 +248,17 @@ func (a *app) buildOutputs(cfg *config.Config, of outputFlags, dryRun bool) ([]o
 			o, err := pagerdutyout.New(pc, pagerdutyout.Settings{
 				RoutingKey: a.getenv(pc.RoutingKeyEnv),
 				DryRun:     dryRun,
+			}, httpx.New(cfg.HTTP, version.Version, a.log), a.log)
+			if err != nil {
+				return nil, err
+			}
+			outs = append(outs, o)
+		case "teams":
+			tc := cfg.Outputs.Teams
+			o, err := teamsout.New(tc, teamsout.Settings{
+				URL:      a.getenv(tc.URLEnv),
+				AlertURL: a.getenv(tc.AlertURLEnv),
+				DryRun:   dryRun,
 			}, httpx.New(cfg.HTTP, version.Version, a.log), a.log)
 			if err != nil {
 				return nil, err
