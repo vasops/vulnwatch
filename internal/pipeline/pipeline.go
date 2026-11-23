@@ -598,6 +598,7 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 		retried, rst = triageShared(ctx, triager.WithBudget(left), ritems)
 		tst = tst.Add(rst)
 	}
+	usage := triageUsage(o.Log, triager) // before the deadline check: answered requests were billed
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -711,6 +712,7 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 		ImageFiltered: img.filtered, UnmatchedImages: img.unmatched, KernelFiltered: osFiltered,
 		SingleSource:   singleSource,
 		TriageFailures: tst.Failed,
+		TriageUsage:    usage,
 	}
 	switch {
 	case o.Bootstrap:
@@ -827,6 +829,21 @@ func auditReported(ctx context.Context, log *slog.Logger, entries []report.Entry
 				"product", it.Product, "version", it.Constraint, "id", it.ID, "priority", it.Priority,
 				"change", "found by the full-history check", "kev", it.KEV, "cvss", it.CVSS)
 		}
+	}
+}
+
+// triageUsage reads the total once, after the last triage call of the run;
+// nil when Claude was not called.
+func triageUsage(log *slog.Logger, t *triage.Triager) *report.TriageUsage {
+	model, u, ok := t.Usage()
+	if !ok || u.Requests == 0 {
+		return nil
+	}
+	log.Info("triage usage", "model", model, "requests", u.Requests, "input_tokens", u.InputTokens, "output_tokens", u.OutputTokens,
+		"cache_creation_input_tokens", u.CacheCreationInputTokens, "cache_read_input_tokens", u.CacheReadInputTokens)
+	return &report.TriageUsage{
+		Model: model, Requests: u.Requests, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
+		CacheCreationInputTokens: u.CacheCreationInputTokens, CacheReadInputTokens: u.CacheReadInputTokens,
 	}
 }
 
