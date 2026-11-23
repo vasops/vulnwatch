@@ -72,12 +72,10 @@ type Counts struct {
 // count the environments where they are P1.
 func Count[T any](fs []Finding[T]) Counts {
 	c := Counts{Findings: len(fs)}
-	var seen []ScopeRef
+	seen := map[ScopeRef]struct{}{}
 	for _, f := range fs {
 		for _, s := range f.Scopes {
-			if !slices.Contains(seen, s) {
-				seen = append(seen, s)
-			}
+			seen[s] = struct{}{}
 		}
 	}
 	c.Scopes = len(seen)
