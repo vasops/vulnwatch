@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -20,6 +21,9 @@ type Anthropic struct {
 	model     string
 	effort    anthropic.OutputConfigEffort // empty: the model's default
 	maxTokens int64
+
+	mu    sync.Mutex // Complete may run on several goroutines
+	usage Usage
 }
 
 func NewAnthropic(cfg config.Triage, apiKey string, hc *http.Client) *Anthropic {
@@ -56,6 +60,9 @@ func (a *Anthropic) Complete(ctx context.Context, system, user string, schema ma
 	if err != nil {
 		return "", err
 	}
+	// Counted before the stop-reason checks: a truncated or refused answer
+	// spent its tokens too.
+	a.record(msg.Usage)
 	switch msg.StopReason {
 	case anthropic.StopReasonMaxTokens:
 		return "", errors.New("model output truncated at max_tokens")
@@ -72,4 +79,20 @@ func (a *Anthropic) Complete(ctx context.Context, system, user string, schema ma
 		return "", fmt.Errorf("no text in response (stop reason %s)", msg.StopReason)
 	}
 	return sb.String(), nil
+}
+
+func (a *Anthropic) record(u anthropic.Usage) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.usage = a.usage.Add(Usage{
+		Requests: 1, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
+		CacheCreationInputTokens: u.CacheCreationInputTokens, CacheReadInputTokens: u.CacheReadInputTokens,
+	})
+}
+
+// Usage returns the total of every request answered so far.
+func (a *Anthropic) Usage() Usage {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.usage
 }

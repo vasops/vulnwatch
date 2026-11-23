@@ -388,13 +388,86 @@ func TestAnthropicCompleter(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-test",
 			"content":[{"type":"text","text":"{\"results\":[]}"}],"stop_reason":"end_turn",
-			"usage":{"input_tokens":1,"output_tokens":1}}`))
+			"usage":{"input_tokens":1,"output_tokens":2,"cache_creation_input_tokens":3,"cache_read_input_tokens":4}}`))
 	}))
 	defer srv.Close()
 	a := NewAnthropic(config.Triage{Model: "claude-test", Effort: "high", MaxTokens: 100, BaseURL: srv.URL, Timeout: config.Duration(5 * time.Second)}, "sk-test", nil)
 	out, err := a.Complete(context.Background(), "sys", "user", outputSchema)
 	if err != nil || out != `{"results":[]}` {
 		t.Fatalf("out=%q err=%v", out, err)
+	}
+	if _, err := a.Complete(context.Background(), "sys", "user", outputSchema); err != nil {
+		t.Fatal(err)
+	}
+	want := Usage{Requests: 2, InputTokens: 2, OutputTokens: 4, CacheCreationInputTokens: 6, CacheReadInputTokens: 8}
+	if got := a.Usage(); got != want {
+		t.Fatalf("two calls add up: usage = %+v, want %+v", got, want)
+	}
+}
+
+// A truncated answer is an error, but its tokens were spent and are counted.
+func TestAnthropicCompleterCountsTruncatedResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-test",
+			"content":[{"type":"text","text":"{\"res"}],"stop_reason":"max_tokens",
+			"usage":{"input_tokens":7,"output_tokens":100,"cache_creation_input_tokens":3,"cache_read_input_tokens":4}}`))
+	}))
+	defer srv.Close()
+	a := NewAnthropic(config.Triage{Model: "claude-test", MaxTokens: 100, BaseURL: srv.URL, Timeout: config.Duration(5 * time.Second)}, "sk-test", nil)
+	if _, err := a.Complete(context.Background(), "sys", "user", outputSchema); err == nil {
+		t.Fatal("a truncated answer is an error")
+	}
+	want := Usage{Requests: 1, InputTokens: 7, OutputTokens: 100, CacheCreationInputTokens: 3, CacheReadInputTokens: 4}
+	if got := a.Usage(); got != want {
+		t.Fatalf("usage = %+v, want %+v", got, want)
+	}
+}
+
+func TestUsageAdd(t *testing.T) {
+	tests := []struct {
+		name       string
+		a, b, want Usage
+	}{
+		{
+			"distinct values in every field",
+			Usage{Requests: 1, InputTokens: 2, OutputTokens: 3, CacheCreationInputTokens: 4, CacheReadInputTokens: 5},
+			Usage{Requests: 10, InputTokens: 20, OutputTokens: 30, CacheCreationInputTokens: 40, CacheReadInputTokens: 50},
+			Usage{Requests: 11, InputTokens: 22, OutputTokens: 33, CacheCreationInputTokens: 44, CacheReadInputTokens: 55},
+		},
+		{"zero value", Usage{}, Usage{Requests: 1, InputTokens: 2}, Usage{Requests: 1, InputTokens: 2}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.a.Add(tt.b); got != tt.want {
+				t.Fatalf("Add = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+type usageFake struct {
+	fakeCompleter
+	u Usage
+}
+
+func (f *usageFake) Usage() Usage { return f.u }
+
+func TestTriagerUsage(t *testing.T) {
+	cfg := config.Triage{Enabled: true, Model: "claude-test", MaxFindings: 10, BatchSize: 5}
+	if _, _, ok := New(cfg, &fakeCompleter{}, quietLog()).Usage(); ok {
+		t.Error("a completer without usage reports none")
+	}
+	if _, _, ok := New(cfg, nil, quietLog()).Usage(); ok {
+		t.Error("no completer, no usage")
+	}
+	f := &usageFake{u: Usage{Requests: 2, InputTokens: 9, OutputTokens: 8, CacheCreationInputTokens: 7, CacheReadInputTokens: 6}}
+	tr := New(cfg, f, quietLog())
+	for name, got := range map[string]*Triager{"original": tr, "budget copy": tr.WithBudget(1)} {
+		model, u, ok := got.Usage()
+		if !ok || model != "claude-test" || u != f.u {
+			t.Errorf("%s: model=%q usage=%+v ok=%v", name, model, u, ok)
+		}
 	}
 }
 
