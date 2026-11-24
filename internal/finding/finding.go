@@ -91,6 +91,9 @@ type Finding struct {
 	KEVDateAdded   string  `json:"kev_date_added,omitempty"`
 	EPSS           float64 `json:"epss,omitempty"`
 	EPSSPercentile float64 `json:"epss_percentile,omitempty"`
+	// PublicExploit: a Metasploit module or a Nuclei template exists for one
+	// of the finding's CVEs (sources.exploits).
+	PublicExploit bool `json:"public_exploit,omitempty"`
 	// Red Hat's rating (critical, important, moderate, low), statement and
 	// mitigation; about Red Hat's builds, but they name the conditions under
 	// which a flaw is exploitable.
@@ -413,6 +416,7 @@ func merge(group []Finding) Finding {
 		m.References = append(m.References, f.References...)
 		m.Sources = append(m.Sources, f.Sources...)
 		m.KEV = m.KEV || f.KEV
+		m.PublicExploit = m.PublicExploit || f.PublicExploit
 		m.KEVDateAdded = cmp.Or(m.KEVDateAdded, f.KEVDateAdded)
 		m.EPSS = max(m.EPSS, f.EPSS)
 		m.EPSSPercentile = max(m.EPSSPercentile, f.EPSSPercentile)
@@ -442,18 +446,21 @@ func merge(group []Finding) Finding {
 
 // Snapshot holds the fields whose change makes a finding worth re-reporting.
 type Snapshot struct {
-	Severity string   `json:"severity"`
-	CVSS     float64  `json:"cvss"`
-	KEV      bool     `json:"kev"`
-	Fixed    []string `json:"fixed"`
-	Match    string   `json:"match"`
+	Severity string  `json:"severity"`
+	CVSS     float64 `json:"cvss"`
+	KEV      bool    `json:"kev"`
+	// PublicExploit is omitted when false, so older stored snapshots and
+	// their hashes stay as they are.
+	PublicExploit bool     `json:"public_exploit,omitempty"`
+	Fixed         []string `json:"fixed"`
+	Match         string   `json:"match"`
 }
 
 // Snapshot returns the material state of the finding.
 func (f *Finding) Snapshot() Snapshot {
 	fixed := slices.Clone(f.Fixed)
 	slices.Sort(fixed)
-	return Snapshot{Severity: f.Severity, CVSS: f.CVSS, KEV: f.KEV, Fixed: fixed, Match: f.Match}
+	return Snapshot{Severity: f.Severity, CVSS: f.CVSS, KEV: f.KEV, PublicExploit: f.PublicExploit, Fixed: fixed, Match: f.Match}
 }
 
 // Hash is a stable content hash of the snapshot.
@@ -464,7 +471,7 @@ func (s Snapshot) Hash() string {
 }
 
 // Changes lists material changes from prev to cur, or nil if none.
-// Material: severity raised, added to KEV, a new fixed version, or our
+// Material: severity raised, added to KEV, a public exploit, a new fixed version, or our
 // affected status changed.
 func Changes(prev, cur Snapshot) []string {
 	var out []string
@@ -473,6 +480,9 @@ func Changes(prev, cur Snapshot) []string {
 	}
 	if cur.KEV && !prev.KEV {
 		out = append(out, "added to CISA KEV")
+	}
+	if cur.PublicExploit && !prev.PublicExploit {
+		out = append(out, "public exploit available")
 	}
 	var newFixed []string
 	for _, v := range cur.Fixed {

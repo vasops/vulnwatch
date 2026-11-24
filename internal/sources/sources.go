@@ -44,7 +44,7 @@ func InCluster(s Source) bool {
 	return ok && c.InCluster()
 }
 
-// Enricher adds data (KEV, EPSS) to already collected findings in place.
+// Enricher adds data (KEV, EPSS, public exploits) to already collected findings in place.
 type Enricher interface {
 	Name() string
 	Enrich(ctx context.Context, fs []finding.Finding) error

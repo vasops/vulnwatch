@@ -82,7 +82,7 @@ func keepImageFinding(f finding.Finding, p catalog.Product, cfg config.TrivySour
 	if !hasFixedPackage(f) {
 		return false
 	}
-	if f.KEV || (cfg.MinEPSS > 0 && f.EPSS >= cfg.MinEPSS) {
+	if f.KEV || f.PublicExploit || (cfg.MinEPSS > 0 && f.EPSS >= cfg.MinEPSS) {
 		return true
 	}
 	min := cfg.MinSeverity

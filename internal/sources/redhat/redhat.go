@@ -121,7 +121,7 @@ func (e *Enricher) Enrich(ctx context.Context, fs []finding.Finding) error {
 func (e *Enricher) detailOrder(fs []finding.Finding, known map[string]*info) []string {
 	type cand struct {
 		id        string
-		kev       bool
+		kev       bool // KEV-listed or with a public exploit
 		epss, cvs float64
 	}
 	byID := map[string]*cand{}
@@ -138,7 +138,7 @@ func (e *Enricher) detailOrder(fs []finding.Finding, known map[string]*info) []s
 				byID[id] = c
 				cs = append(cs, c)
 			}
-			c.kev = c.kev || f.KEV
+			c.kev = c.kev || f.KEV || f.PublicExploit
 			c.epss = max(c.epss, f.EPSS)
 			c.cvs = max(c.cvs, f.CVSS)
 		}

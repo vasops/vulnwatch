@@ -94,6 +94,7 @@ All outputs link each finding to its **NVD record** and **GitHub advisory**
       "severity": "critical",
       "cvss": 9.8,
       "kev": true,
+      "public_exploit": false,
       "epss": 0.91234,
       "fixed": ["26.1.4"],
       "action": "Upgrade to 26.1.4 today.",
@@ -297,28 +298,33 @@ metrics:
 ```
 
 The Helm chart ships two Grafana dashboards and alert rules (per tenant,
-environment and product):
+environment and product): `VulnwatchP1Open`, `VulnwatchExploitedVulnerabilityOpen` (KEV) and
+`VulnwatchPublicExploitOpen` (public exploit); the last two stay quiet for a product that already
+has an alert above them.
 
 | Dashboard                                                                                                           | Shows                                                                                                                                                                                                                                                                                             |
 | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **vulnwatch · overview** ([json](../charts/vulnwatch/dashboards/vulnwatch-overview.json), uid `vulnwatch-overview`) | every tenant at a glance: open P1/P2/P3/P4 and KEV findings, days since the oldest open finding was first seen, the last run and the inventory age per tenant environment; the vulnerabilities affecting the most tenants; what was discovered when, everywhere. A tenant links to its dashboard. |
-| **vulnwatch · tenant** ([json](../charts/vulnwatch/dashboards/vulnwatch.json), uid `vulnwatch`)                     | one tenant (`$tenant`, `$environment`): status, what was discovered when, open findings per product with version and upgrade target, every open finding with NVD/GitHub links, trends and source health.                                                                                          |
+| **vulnwatch · overview** ([json](../charts/vulnwatch/dashboards/vulnwatch-overview.json), uid `vulnwatch-overview`) | every tenant at a glance: open P1/P2/P3/P4 and KEV findings (status panels count KEV and public exploit findings; the vulnerability tables have a Public exploit column), days since the oldest open finding was first seen, the last run and the inventory age per tenant environment; the vulnerabilities affecting the most tenants; what was discovered when, everywhere. A tenant links to its dashboard. |
+| **vulnwatch · tenant** ([json](../charts/vulnwatch/dashboards/vulnwatch.json), uid `vulnwatch`)                     | one tenant (`$tenant`, `$environment`): status, what was discovered when, open findings per product with version and upgrade target, every open finding with NVD/GitHub links (KEV and Public exploit columns), open KEV and public exploit counts in the status row, trends and source health.                                                                                          |
 
-| Metric                                                                | Labels                                                                                  | Meaning                                                                         |
-| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `vulnwatch_run_success`                                               | mode                                                                                    | 1 if the run and every output succeeded                                         |
-| `vulnwatch_last_success_timestamp_seconds`                            |                                                                                         | last successful run                                                             |
-| `vulnwatch_tenant_info`                                               | tenant, environment, local                                                              | the watched tenant environments (`local="true"`: the cluster vulnwatch runs in) |
-| `vulnwatch_tenant_inventory_timestamp_seconds`                        | tenant, environment                                                                     | the stack's `generated_at` (00:00 UTC); only stacks that have one               |
-| `vulnwatch_findings_new`                                              | tenant, environment, priority                                                           | reported in the last run                                                        |
-| `vulnwatch_findings_open`                                             | tenant, environment, product, priority                                                  | affecting the stack now                                                         |
-| `vulnwatch_findings_open_kev`, `…_open_unfixed`, `…_open_oldest_days` | tenant, environment, product                                                            | exploited, without a fix, days since the oldest was first seen                  |
-| `vulnwatch_findings_open_image_only`                                  | tenant, environment, product                                                            | open findings only Trivy reports (fixed by a newer image)                       |
-| `vulnwatch_finding_first_reported_timestamp_seconds`                  | tenant, environment, product, id, title, priority, fixed, image, nvd_url, github_url, … | per open finding: first reported time; `image` is `confirmed`, `only` or empty  |
-| `vulnwatch_product_upgrade_info`                                      | tenant, environment, product, constraint, upgrade_to                                    | lowest version that fixes every open finding with a fix                         |
-| `vulnwatch_source_findings`, `vulnwatch_source_errors`                | source                                                                                  | per-source yield and failures                                                   |
-| `vulnwatch_findings_single_source`                                    | source                                                                                  | findings only cvelist or only NVD found in full-history checks (when both run)  |
-| `vulnwatch_product_info`                                              | tenant, environment, product, constraint, exposure, criticality                         | the watched inventory                                                           |
+| Metric                                                 | Labels                                                                                                       | Meaning                                                                         |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `vulnwatch_run_success`                                | mode                                                                                                         | 1 if the run and every output succeeded                                         |
+| `vulnwatch_last_success_timestamp_seconds`             |                                                                                                              | last successful run                                                             |
+| `vulnwatch_tenant_info`                                | tenant, environment, local                                                                                   | the watched tenant environments (`local="true"`: the cluster vulnwatch runs in) |
+| `vulnwatch_tenant_inventory_timestamp_seconds`         | tenant, environment                                                                                          | the stack's `generated_at` (00:00 UTC); only stacks that have one               |
+| `vulnwatch_findings_new`                               | tenant, environment, priority                                                                                | reported in the last run                                                        |
+| `vulnwatch_findings_open`                              | tenant, environment, product, priority                                                                       | affecting the stack now                                                         |
+| `vulnwatch_findings_open_kev`                          | tenant, environment, product                                                                                 | open findings listed in CISA KEV (exploited in the wild)                        |
+| `vulnwatch_findings_open_public_exploit`               | tenant, environment, product                                                                                 | open findings with a public exploit (Metasploit module or Nuclei template)      |
+| `vulnwatch_findings_open_unfixed`                      | tenant, environment, product                                                                                 | open findings without a fixed version                                           |
+| `vulnwatch_findings_open_oldest_days`                  | tenant, environment, product                                                                                 | days since the oldest open finding was first seen                               |
+| `vulnwatch_findings_open_image_only`                   | tenant, environment, product                                                                                 | open findings only Trivy reports (fixed by a newer image)                       |
+| `vulnwatch_finding_first_reported_timestamp_seconds`   | tenant, environment, product, id, title, priority, kev, public_exploit, fixed, image, nvd_url, github_url, … | per open finding: first reported time; `image` is `confirmed`, `only` or empty  |
+| `vulnwatch_product_upgrade_info`                       | tenant, environment, product, constraint, upgrade_to                                                         | lowest version that fixes every open finding with a fix                         |
+| `vulnwatch_source_findings`, `vulnwatch_source_errors` | source                                                                                                       | per-source yield and failures                                                   |
+| `vulnwatch_findings_single_source`                     | source                                                                                                       | findings only cvelist or only NVD found in full-history checks (when both run)  |
+| `vulnwatch_product_info`                               | tenant, environment, product, constraint, exposure, criticality                                              | the watched inventory                                                           |
 
 Also: `vulnwatch_run_timestamp_seconds`, `vulnwatch_run_duration_seconds`,
 `vulnwatch_findings_skipped`, `vulnwatch_findings_untriaged`,

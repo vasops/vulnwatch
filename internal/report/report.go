@@ -112,6 +112,7 @@ type OpenItem struct {
 	CVSS          float64    `json:"cvss,omitempty"`
 	Severity      string     `json:"severity"`
 	KEV           bool       `json:"kev"`
+	PublicExploit bool       `json:"public_exploit"`
 	EPSS          float64    `json:"epss,omitempty"`
 	Match         string     `json:"match"`                     // affected, or unknown when only part of the constraint is affected
 	NoVersionData bool       `json:"no_version_data,omitempty"` // open until the product's version changes
@@ -173,18 +174,19 @@ const (
 
 // BaselineSummary is one product whose full advisory history was checked.
 type BaselineSummary struct {
-	Product     string `json:"product"`
-	Tenant      string `json:"tenant,omitempty"`
-	Environment string `json:"environment,omitempty"`
-	Scope       string `json:"-"` // "tenant/environment" when stack.yaml has tenants (outputs name it)
-	Constraint  string `json:"constraint"`
-	Reason      string `json:"reason"`
-	Checked     int    `json:"checked"`         // advisories in the product's history
-	Affected    int    `json:"affected"`        // affect every deployed version
-	Unknown     int    `json:"unknown"`         // depend on the exact version (partial overlap)
-	NoData      int    `json:"no_version_data"` // no version data: only counted
-	KEV         int    `json:"kev"`             // affected or unknown, and exploited in the wild
-	Complete    bool   `json:"complete"`        // false: a source failed; checked again next run
+	Product       string `json:"product"`
+	Tenant        string `json:"tenant,omitempty"`
+	Environment   string `json:"environment,omitempty"`
+	Scope         string `json:"-"` // "tenant/environment" when stack.yaml has tenants (outputs name it)
+	Constraint    string `json:"constraint"`
+	Reason        string `json:"reason"`
+	Checked       int    `json:"checked"`         // advisories in the product's history
+	Affected      int    `json:"affected"`        // affect every deployed version
+	Unknown       int    `json:"unknown"`         // depend on the exact version (partial overlap)
+	NoData        int    `json:"no_version_data"` // no version data: only counted
+	KEV           int    `json:"kev"`             // affected or unknown, and exploited in the wild
+	PublicExploit int    `json:"public_exploit"`  // affected or unknown, and with a public exploit
+	Complete      bool   `json:"complete"`        // false: a source failed; checked again next run
 }
 
 // Item is one finding as presented in reports.
@@ -201,6 +203,7 @@ type Item struct {
 	CVSS           float64    `json:"cvss,omitempty"`
 	Severity       string     `json:"severity"`
 	KEV            bool       `json:"kev"`
+	PublicExploit  bool       `json:"public_exploit"`
 	EPSS           float64    `json:"epss,omitempty"`
 	EPSSPercentile float64    `json:"epss_percentile,omitempty"`
 	Match          string     `json:"match"`
@@ -303,6 +306,7 @@ func Build(m Meta, entries []Entry) Report {
 		return cmp.Or(
 			cmp.Compare(a.Priority, b.Priority),
 			boolCmp(b.KEV, a.KEV),
+			boolCmp(b.PublicExploit, a.PublicExploit),
 			cmp.Compare(b.CVSS, a.CVSS),
 			cmp.Compare(a.Tenant, b.Tenant),
 			cmp.Compare(a.Environment, b.Environment),
@@ -321,7 +325,7 @@ func Build(m Meta, entries []Entry) Report {
 		r.Baselines[i].Scope = scope(r.Baselines[i].Tenant, r.Baselines[i].Environment)
 	}
 	slices.SortStableFunc(r.Baselines, func(a, b BaselineSummary) int {
-		return cmp.Or(cmp.Compare(b.KEV, a.KEV), cmp.Compare(b.Affected, a.Affected), cmp.Compare(b.Unknown, a.Unknown), cmp.Compare(a.Product, b.Product))
+		return cmp.Or(cmp.Compare(b.KEV, a.KEV), cmp.Compare(b.PublicExploit, a.PublicExploit), cmp.Compare(b.Affected, a.Affected), cmp.Compare(b.Unknown, a.Unknown), cmp.Compare(a.Product, b.Product))
 	})
 	var items []Item
 	for _, e := range entries {
@@ -343,6 +347,7 @@ func Build(m Meta, entries []Entry) Report {
 			cmp.Compare(a.Environment, b.Environment),
 			cmp.Compare(a.Product, b.Product),
 			boolCmp(b.KEV, a.KEV),
+			boolCmp(b.PublicExploit, a.PublicExploit),
 			cmp.Compare(b.CVSS, a.CVSS),
 			cmp.Compare(a.ID, b.ID),
 		)
@@ -393,7 +398,7 @@ func (r Report) BaselinesFound() []BaselineSummary { f, _ := r.BaselineSplit(); 
 func (r Report) BaselinesClean() []BaselineSummary { _, c := r.BaselineSplit(); return c }
 
 // Facts describes a baseline in one line, e.g. "412 advisories checked ·
-// 3 affected · 2 depend on the exact version · 1 exploited (KEV)".
+// 3 affected · 2 depend on the exact version · 1 exploited (KEV) · 1 with a public exploit".
 func (b BaselineSummary) Facts() string {
 	parts := []string{fmt.Sprintf("%d advisories checked", b.Checked)}
 	if b.Affected > 0 {
@@ -407,6 +412,9 @@ func (b BaselineSummary) Facts() string {
 	}
 	if b.KEV > 0 {
 		parts = append(parts, fmt.Sprintf("%d exploited (KEV)", b.KEV))
+	}
+	if b.PublicExploit > 0 {
+		parts = append(parts, fmt.Sprintf("%d with a public exploit", b.PublicExploit))
 	}
 	if !b.Complete {
 		parts = append(parts, "incomplete: a source failed, checked again next run")
@@ -581,6 +589,7 @@ func toItem(e Entry, links AdvisoryLinks) Item {
 		CVSS:           f.CVSS,
 		Severity:       f.Severity,
 		KEV:            f.KEV,
+		PublicExploit:  f.PublicExploit,
 		EPSS:           f.EPSS,
 		EPSSPercentile: f.EPSSPercentile,
 		Match:          f.Match,

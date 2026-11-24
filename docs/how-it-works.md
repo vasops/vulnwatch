@@ -4,7 +4,7 @@
 %%{init: {"htmlLabels": false, "flowchart": {"htmlLabels": false}, "theme": "base", "themeVariables": {"lineColor": "#8A948F", "titleColor": "#FFFFFF", "primaryTextColor": "#FFFFFF", "textColor": "#7A8781"}}}%%
 flowchart LR
   collect["Collect<br/>every source,<br/>once per product"] --> merge["Merge<br/>duplicates by<br/>ID and alias"]
-  merge --> enrich["Enrich<br/>KEV, EPSS"]
+  merge --> enrich["Enrich<br/>KEV, EPSS, exploits"]
   enrich --> filter["Filter<br/>image and kernel noise,<br/>min_cvss"]
   filter --> match{"Our version<br/>affected?"}
   match --> counted["Not affected<br/>counted only"]
@@ -58,10 +58,12 @@ flowchart LR
 4. **Match:** each advisory is compared with the version you run (see
    [Version matching](#version-matching)).
 5. **New or changed:** a finding is reported once when new, and again only on
-   a material change: higher severity, added to KEV, a new fixed version or a
-   different match.
+   a material change: higher severity, added to KEV, a public exploit
+   published, a new fixed version or a different match.
 6. **min_cvss:** findings below the product's threshold are counted, not
-   listed. KEV-listed findings are always kept.
+   listed. KEV-listed findings and those with a public exploit are always
+   kept (the same exemption applies to Trivy-only image findings and kernel
+   fixes).
 7. **Triage:** Claude returns whether it's relevant, a priority (P1 act today,
    P2 this week, P3 next maintenance, P4 informational), a plain-language
    summary and the action. Invalid answers are retried once; after that, or
@@ -74,11 +76,27 @@ flowchart LR
    nothing (a bad API key or model name) fails after reporting. When a
    product's exposure or criticality changes, a
    still-open finding gets the more urgent of Claude's priority and the
-   rules' priority now. The rules weigh KEV, CVSS, exposure and criticality;
-   CISA's SSVC exploitation "active" counts like KEV on internet-facing or
+   rules' priority now. The rules weigh KEV, a public exploit, CVSS, exposure and criticality;
+   a public exploit (a Metasploit exploit module or Nuclei template for the CVE,
+   from indexes downloaded once per run and cached for `sources.exploits.cache_ttl`)
+   counts like KEV, and CISA's SSVC exploitation "active" counts like KEV on internet-facing or
    high-criticality products; EPSS ≥ 0.1 only raises a priority; and unless
    exploited, a finding that may not affect your version (match unknown) is at
    most P2.
+   **Public exploits** come from the Metasploit and Nuclei indexes
+   (`sources.exploits`). Of Metasploit only exploit modules count (not
+   auxiliary or post modules); every Nuclei CVE template does. Each index is downloaded once per run and cached as a list of
+   CVE IDs for `cache_ttl`. An index that is down, not valid or lists no CVE
+   is reported as a failing source (`exploits`) and never stops the run; an
+   older cached list is used meanwhile, and a flag already stored stays
+   while an index can't be read. Open findings the run didn't fetch are
+   checked too, so a module published after the CVE raises the priority and
+   is reported once as "public exploit available". The first run after
+   enabling the source therefore reports every open finding that already has
+   an exploit once, including stored findings that were earlier closed as not
+   relevant; set `sources.exploits.enabled: false` to opt out, or an
+   empty `metasploit_url` / `nuclei_url` to turn one index off.
+
 8. **Report and state:** outputs render, then the state is written. It is
    written only if every output succeeded, so a failed Slack post is reported
    again next time (at-least-once: channels that worked may get it twice).
@@ -94,7 +112,7 @@ flowchart LR
   newadv["New advisory<br/>affects our version"] --> reported["Reported<br/>Slack · report · dashboard"]
   oldadv["Old advisory<br/>found by a full-history check"] --> open
   reported --> open["Still open<br/>listed in every run"]
-  open --> change["Material change<br/>KEV · severity · fix · match"]
+  open --> change["Material change<br/>KEV · exploit · severity · fix · match"]
   change --> reported
   open --> closed["Closed<br/>upgraded past the fix,<br/>product removed,<br/>not relevant or rejected"]
 
@@ -125,6 +143,7 @@ flowchart LR
 | RSS/Atom                                                | vendors without an API (GitLab, Drupal)                                                                                                            | none                       |
 | CISA KEV (GitHub copy)                                  | exploited in the wild                                                                                                                              | none                       |
 | FIRST EPSS                                              | probability of exploitation                                                                                                                        | none                       |
+| Metasploit and Nuclei indexes (GitHub)                  | a public exploit exists for the CVE (a Metasploit exploit module or a Nuclei template)                                                                   | none                       |
 | Red Hat Security Data API                               | Red Hat's rating and statement (when a flaw is exploitable) for CVEs already found; context for triage and the P1 card                             | none                       |
 | trivy-operator VulnerabilityReports                     | vulnerable packages in the running images (off by default)                                                                                         | in-cluster service account |
 | Distribution security data via OSV                      | the nodes' kernel (`os:` in stack.yaml): Debian, Ubuntu, RHEL, Rocky Linux, AlmaLinux, SUSE, openSUSE Leap                                         | none                       |

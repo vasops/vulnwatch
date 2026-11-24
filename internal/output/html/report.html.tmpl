@@ -76,7 +76,7 @@ table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:4px 8px;
 {{template "advisories" .Advisories}}
 {{if .CVSS}}<span class="badge">CVSS {{printf "%.1f" .CVSS}}</span>{{end}}
 <span class="badge">{{.Severity}}</span>
-{{if .KEV}}<span class="badge kev">KEV</span>{{end}}
+{{if .KEV}}<span class="badge kev">KEV</span>{{end}}{{if .PublicExploit}} <span class="badge kev">public exploit</span>{{end}}
 {{if .EPSS}}<span class="badge">EPSS {{printf "%.1f" (pct .EPSS)}}%</span>{{end}}
 <span class="badge">match: {{.Match}}</span>
 {{if .ImageOnly}}<span class="badge">image only</span>{{else if .Packages}}<span class="badge">confirmed in image</span>{{end}}
@@ -105,7 +105,7 @@ table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:4px 8px;
 {{range .Open}}<tr>
 <td class="{{.Priority}}"><b>{{.Priority}}</b></td>
 <td>{{with .Scope}}<span class="muted">{{.}}</span> {{end}}{{.Product}} <span class="muted">{{.Constraint}}</span></td>
-<td><span class="id">{{if .Link}}<a href="{{.Link}}" rel="noopener noreferrer">{{.ID}}</a>{{else}}{{.ID}}{{end}}</span>{{if .KEV}} <span class="badge kev">KEV</span>{{end}}<br><span class="muted">{{.Title}}{{if .ImageOnly}} · image only{{else if .NoVersionData}} · no version data; clears when you upgrade{{else if ne .Match "affected"}} · depends on exact version{{end}}</span>{{if .Packages}}<br><span class="muted">In images: {{pkgs .Packages}}</span>{{end}}{{if .Advisories}}<br>{{template "advisories" .Advisories}}{{end}}</td>
+<td><span class="id">{{if .Link}}<a href="{{.Link}}" rel="noopener noreferrer">{{.ID}}</a>{{else}}{{.ID}}{{end}}</span>{{if .KEV}} <span class="badge kev">KEV</span>{{end}}{{if .PublicExploit}} <span class="badge kev">public exploit</span>{{end}}<br><span class="muted">{{.Title}}{{if .ImageOnly}} · image only{{else if .NoVersionData}} · no version data; clears when you upgrade{{else if ne .Match "affected"}} · depends on exact version{{end}}</span>{{if .Packages}}<br><span class="muted">In images: {{pkgs .Packages}}</span>{{end}}{{if .Advisories}}<br>{{template "advisories" .Advisories}}{{end}}</td>
 <td>{{.Severity}}{{if .CVSS}} {{printf "%.1f" .CVSS}}{{end}}</td>
 <td>{{join .Fixed ", "}}</td>
 <td>{{.DaysOpen}}d</td>

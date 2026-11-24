@@ -150,6 +150,9 @@ func writeAudit(w io.Writer, results []pipeline.AuditProduct, warnings []string)
 			if f.KEV {
 				parts = append(parts, "[KEV]")
 			}
+			if f.PublicExploit {
+				parts = append(parts, "[EXPLOIT]")
+			}
 			if len(f.Fixed) > 0 {
 				parts = append(parts, "fix "+strings.Join(f.Fixed, ", "))
 			} else {

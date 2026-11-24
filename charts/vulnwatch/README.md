@@ -97,7 +97,7 @@ metrics:
 | `metrics.prometheusRule.enabled` / `labels`                       | `false` / `{}`                                                 | alert rules; add labels your Prometheus selects on                                                                                                                                                                                                                                                               |
 | `metrics.prometheusRule.maxRunAgeHours`                           | `26`                                                           | alert when no run succeeded for this long                                                                                                                                                                                                                                                                        |
 | `metrics.prometheusRule.inventoryMaxAgeDays`                      | `30`                                                           | alert when a stack's `generated_at` (written by `stack discover` / `stack merge`) is older than this many days                                                                                                                                                                                                   |
-| `metrics.prometheusRule.findingAlerts`                            | `true`                                                         | alerts for open P1 and KEV findings                                                                                                                                                                                                                                                                              |
+| `metrics.prometheusRule.findingAlerts`                            | `true`                                                         | alerts for open P1, KEV and public exploit findings                                                                                                                                                                                                                                                                          |
 | `networkPolicy.enabled`                                           | `false`                                                        | egress only: DNS, HTTPS, Pushgateway port, and with `trivy.enabled` the API server                                                                                                                                                                                                                               |
 | `networkPolicy.apiServerPorts`                                    | `[443, 6443]`                                                  | API ports allowed with `trivy.enabled` (service port and, after DNAT, the API server's)                                                                                                                                                                                                                          |
 | `networkPolicy.pinDNS` / `dnsPeers`                               | `false` / kube-dns in kube-system                              | DNS only to these peers; always with `cilium.enabled`                                                                                                                                                                                                                                                            |
@@ -127,7 +127,8 @@ chart's ServiceMonitor (`serviceMonitor.enabled: true`) sets it by default.
 Two **dashboards** (one ConfigMap):
 
 - **vulnwatch · overview** (uid `vulnwatch-overview`): every tenant at a
-  glance. A table of tenant environments with open P1/P2/P3/P4 and KEV
+  glance. Status panels count open P1 and P2, KEV and public exploit
+  findings. A table of tenant environments with open P1/P2/P3/P4 and KEV
   findings, days since the oldest open finding was first seen, the last
   run's new findings, the last run and the inventory age (days since
   `generated_at`); the vulnerabilities affecting the most tenants; what was discovered when, everywhere. Click a tenant to
@@ -135,8 +136,10 @@ Two **dashboards** (one ConfigMap):
 - **vulnwatch · tenant** (uid `vulnwatch`): run status, what was discovered
   in the selected period (and when), open findings per product with the
   version we run and the version to upgrade to, every open finding with when
-  it was first reported and its NVD and GitHub links, trends and source
-  health. Tenant, environment, product and priority filters apply.
+  it was first reported and its NVD and GitHub links (tables mark KEV and
+  public exploit findings in their own columns), trends and source health.
+  The status row counts open KEV and public exploit findings in two panels.
+  Tenant, environment, product and priority filters apply.
 
 Without tenants in the stack there is one, `local/default`, and the tenant
 dashboard is the one to use. Slack links open the tenant dashboard
@@ -144,17 +147,18 @@ dashboard is the one to use. Slack links open the tenant dashboard
 
 The **alert rules**:
 
-| Alert                                 | When                                                                                                                                        |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `VulnwatchRunFailed`                  | the last run failed (also when Claude answered none of its triage calls: a bad API key or model name)                                       |
-| `VulnwatchNoRecentSuccess`            | no successful run for `maxRunAgeHours`                                                                                                      |
-| `VulnwatchMetricsAbsent`              | no metrics pushed for `maxRunAgeHours`                                                                                                      |
-| `VulnwatchSourceFailing`              | a source failed for `sourceFailingFor` (1d)                                                                                                 |
-| `VulnwatchSourceSilent`               | an advisory source (cvelist, NVD, OSV, GHSA) returned no findings in any run for 7 days                                                     |
-| `VulnwatchTriageFailing`              | a Claude triage call failed in the last run (API error or invalid output): those findings have the rule-based priority                      |
-| `VulnwatchInventoryStale`             | a tenant environment's (or the local stack's) `generated_at` is older than `inventoryMaxAgeDays` (30); none for stacks without it           |
-| `VulnwatchP1Open`                     | a product has open P1 findings (per tenant and environment)                                                                                 |
-| `VulnwatchExploitedVulnerabilityOpen` | a product is affected by a KEV-listed vulnerability (per tenant and environment) and has no open P1 finding (`VulnwatchP1Open` covers that) |
+| Alert                                 | When                                                                                                                                                                                                                                          |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VulnwatchRunFailed`                  | the last run failed (also when Claude answered none of its triage calls: a bad API key or model name)                                                                                                                                         |
+| `VulnwatchNoRecentSuccess`            | no successful run for `maxRunAgeHours`                                                                                                                                                                                                        |
+| `VulnwatchMetricsAbsent`              | no metrics pushed for `maxRunAgeHours`                                                                                                                                                                                                        |
+| `VulnwatchSourceFailing`              | a source failed for `sourceFailingFor` (1d)                                                                                                                                                                                                   |
+| `VulnwatchSourceSilent`               | an advisory source (cvelist, NVD, OSV, GHSA) returned no findings in any run for 7 days                                                                                                                                                       |
+| `VulnwatchTriageFailing`              | a Claude triage call failed in the last run (API error or invalid output): those findings have the rule-based priority                                                                                                                        |
+| `VulnwatchInventoryStale`             | a tenant environment's (or the local stack's) `generated_at` is older than `inventoryMaxAgeDays` (30); none for stacks without it                                                                                                             |
+| `VulnwatchP1Open`                     | a product has open P1 findings (per tenant and environment); `VulnwatchExploitedVulnerabilityOpen` and `VulnwatchPublicExploitOpen` stay quiet for it                                                                                         |
+| `VulnwatchExploitedVulnerabilityOpen` | a product is affected by a KEV-listed vulnerability (per tenant and environment) and has no open P1 finding (`VulnwatchP1Open` covers that)                                                                                                   |
+| `VulnwatchPublicExploitOpen`          | a product has an open finding with a public exploit (Metasploit module or Nuclei template; per tenant and environment) and neither `VulnwatchExploitedVulnerabilityOpen` (KEV) nor `VulnwatchP1Open` reports it: quiet where KEV or P1 alerts |
 
 ## Trivy integration
 

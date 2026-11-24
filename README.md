@@ -46,7 +46,7 @@ flowchart LR
     adv["GitHub advisories · OSV · NVD<br/>Kubernetes CVE feed · vendor RSS"]
     distro["Distribution security data<br/>Debian · Ubuntu · RHEL · SUSE"]
     trivy["trivy-operator<br/>running images"]
-    exploit["CISA KEV · FIRST EPSS<br/>exploitation"]
+    exploit["CISA KEV · FIRST EPSS<br/>Metasploit · Nuclei<br/>exploitation"]
   end
   clusters --> disc --> stack
   stack --> vw
@@ -89,7 +89,7 @@ what to patch today.
   CVE feed and vendor RSS report issues before patched images exist; Trivy
   confirms what actually runs.
 - **Few alerts, prioritised.** Only new or materially changed findings.
-  Claude weighs the version match, exposure, criticality, KEV, CISA's SSVC
+  Claude weighs the version match, exposure, criticality, KEV, public exploits (Metasploit, Nuclei), CISA's SSVC
   and EPSS and explains the priority; rules set a floor and stand in without Claude, so
   thousands of image and kernel CVEs shrink to the handful that matter.
 - **Every finding comes with an action.** What to upgrade to, and per product

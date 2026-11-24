@@ -5,7 +5,7 @@ model's answers), so it is built to assume something goes wrong. The full
 threat model is in [`threat-model.md`](threat-model.md).
 
 - **Triage can't be talked down.** Advisory text is data, not instructions,
-  for Claude. Exploited findings (KEV, or SSVC "active" on an important
+  for Claude. Exploited findings (KEV, a public exploit, or SSVC "active" on an important
   product) and affected ones with CVSS ≥ 9 stay relevant and at least P2
   whatever the model answers. Any other finding our version is affected by
   and the rules rate P1 or P2 stays listed: Claude may lower it to P3, not

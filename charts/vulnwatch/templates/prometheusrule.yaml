@@ -96,6 +96,23 @@ spec:
           annotations:
             summary: '{{ "{{ $labels.tenant }}/{{ $labels.environment }} {{ $labels.product }}" }} is affected by a vulnerability exploited in the wild (CISA KEV)'
             description: '{{ "{{ $value }}" }} open KEV-listed finding(s). See the vulnwatch report or Slack digest.'
+        # Not for products VulnwatchExploitedVulnerabilityOpen or
+        # VulnwatchP1Open already alert on.
+        - alert: VulnwatchPublicExploitOpen
+          expr: >-
+            (max by (job, instance, tenant, environment, product) (vulnwatch_findings_open_public_exploit{ {{- $sel -}} }) > 0)
+            unless on (job, instance, tenant, environment, product)
+            (
+              (max by (job, instance, tenant, environment, product) (vulnwatch_findings_open_kev{ {{- $sel -}} }) > 0)
+              or
+              (max by (job, instance, tenant, environment, product) (vulnwatch_findings_open{ {{- $sel -}} ,priority="P1"}) > 0)
+            )
+          labels:
+            severity: warning
+            {{- with $r.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: '{{ "{{ $labels.tenant }}/{{ $labels.environment }} {{ $labels.product }}" }} is affected by a vulnerability with a public exploit'
+            description: '{{ "{{ $value }}" }} open finding(s) with a public exploit (Metasploit module or Nuclei template). See the vulnwatch report or Slack digest.'
         - alert: VulnwatchP1Open
           expr: max by (job, instance, tenant, environment, product) (vulnwatch_findings_open{ {{- $sel -}} ,priority="P1"}) > 0
           labels:
@@ -103,7 +120,7 @@ spec:
             {{- with $r.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
           annotations:
             summary: '{{ "{{ $labels.tenant }}/{{ $labels.environment }} {{ $labels.product }}" }} has open P1 vulnerabilities (act today)'
-            description: '{{ "{{ $value }}" }} open P1 finding(s) (KEV-listed ones included: VulnwatchExploitedVulnerabilityOpen stays quiet for this product). See the vulnwatch report or Slack digest.'
+            description: '{{ "{{ $value }}" }} open P1 finding(s) (KEV-listed and public exploit ones included: VulnwatchExploitedVulnerabilityOpen and VulnwatchPublicExploitOpen stay quiet for this product). See the vulnwatch report or Slack digest.'
         {{- end }}
         {{- with $r.extraRules }}
         {{- toYaml . | nindent 8 }}

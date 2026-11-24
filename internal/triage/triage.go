@@ -186,8 +186,8 @@ func (t *Triager) Triage(ctx context.Context, items []Item) (map[string]Result, 
 
 // guard keeps Claude's verdict from hiding what the facts say is serious:
 // advisory text is public input and may try to talk the model down. An
-// exploited finding (KEV, or CISA SSVC exploitation "active" on an important
-// product), or an affected one with CVSS 9 or more, stays relevant and at
+// exploited finding (KEV, a public exploit, or CISA SSVC exploitation "active"
+// on an important product), or an affected one with CVSS 9 or more, stays relevant and at
 // least P2. An affected finding the rules rate P1 or P2 stays listed: Claude
 // may lower it to P3, but its "not relevant" becomes "uncertain" (#17).
 // Every verdict below the rule-based priority is written to the audit log.
@@ -204,7 +204,7 @@ func (t *Triager) guard(ctx context.Context, it Item, r Result) Result {
 		if r.Priority > "P2" {
 			r.Priority = "P2"
 		}
-		r.Note = strings.TrimPrefix(r.Note+"; ", "; ") + "raised to " + r.Priority + ": exploited (KEV or SSVC active) or critical and affected, Claude's verdict was lower"
+		r.Note = strings.TrimPrefix(r.Note+"; ", "; ") + "raised to " + r.Priority + ": exploited (KEV, public exploit or SSVC active) or critical and affected, Claude's verdict was lower"
 	} else if f.Match == string(match.Affected) && rule.Priority <= "P2" && (r.Relevant == "no" || r.Priority > "P3") {
 		floored = true
 		if r.Relevant == "no" {
@@ -215,7 +215,7 @@ func (t *Triager) guard(ctx context.Context, it Item, r Result) Result {
 	}
 	if floored || r.Priority > rule.Priority || (r.Relevant == "no" && rule.Relevant != "no") {
 		logx.Audit(ctx, t.log, "triage below the rules", "key", it.Key(), "rule_priority", rule.Priority,
-			"llm_priority", r.Priority, "llm_relevant", r.Relevant, "floored", floored, "kev", f.KEV, "cvss", f.CVSS)
+			"llm_priority", r.Priority, "llm_relevant", r.Relevant, "floored", floored, "kev", f.KEV, "public_exploit", f.PublicExploit, "cvss", f.CVSS)
 	}
 	return r
 }
@@ -352,12 +352,12 @@ func effectiveScore(f finding.Finding) float64 {
 // default sources.*.min_epss.
 const EPSSHigh = 0.1
 
-// exploited reports KEV-listed findings, and findings CISA's SSVC rates
+// exploited reports KEV-listed findings, those with a public exploit, and findings CISA's SSVC rates
 // exploitation "active" on an important (internet-facing or high-criticality)
 // product: SSVC often says so before KEV lists it.
 func exploited(f finding.Finding, p catalog.Product) bool {
 	important := p.Exposure == "internet" || p.Criticality == "high"
-	return f.KEV || (important && f.SSVCExploitation == "active")
+	return f.KEV || f.PublicExploit || (important && f.SSVCExploitation == "active")
 }
 
 // Deterministic computes the rule-based priority from CVSS, KEV and SSVC
@@ -377,7 +377,7 @@ func Deterministic(it Item) Result {
 		prio = "P4"
 	case exploited(f, p) && important:
 		prio = "P1"
-	case f.KEV:
+	case f.KEV || f.PublicExploit:
 		prio = "P2"
 	case score >= 9 && exposed:
 		prio = "P1"
@@ -423,7 +423,7 @@ func Deterministic(it Item) Result {
 		Relevant:  relevant,
 		Priority:  prio,
 		Summary:   cmp.Or(f.Title, f.ID),
-		Reasoning: fmt.Sprintf("Rule-based: CVSS %.1f, KEV %v, SSVC exploitation %s, EPSS %.2f, exposure %s, criticality %s, match %s%s.", f.CVSS, f.KEV, cmp.Or(f.SSVCExploitation, "n/a"), f.EPSS, p.Exposure, p.Criticality, cmp.Or(f.Match, "unknown"), imageNote(f)),
+		Reasoning: fmt.Sprintf("Rule-based: CVSS %.1f, KEV %v, public exploit %v, SSVC exploitation %s, EPSS %.2f, exposure %s, criticality %s, match %s%s.", f.CVSS, f.KEV, f.PublicExploit, cmp.Or(f.SSVCExploitation, "n/a"), f.EPSS, p.Exposure, p.Criticality, cmp.Or(f.Match, "unknown"), imageNote(f)),
 		Action:    action,
 		Method:    MethodFallback,
 	}

@@ -46,18 +46,19 @@ type Run struct {
 }
 
 type Sources struct {
-	GHSA    GHSASource    `yaml:"ghsa"`
-	OSV     OSVSource     `yaml:"osv"`
-	NVD     NVDSource     `yaml:"nvd"`
-	CVEList CVEListSource `yaml:"cvelist"`
-	RSS     RSSSource     `yaml:"rss"`
-	K8sFeed K8sFeedSource `yaml:"kubernetes_cve_feed"`
-	KEV     KEVSource     `yaml:"kev"`
-	EPSS    EPSSSource    `yaml:"epss"`
-	RedHat  RedHatSource  `yaml:"redhat"`
-	Trivy   TrivySource   `yaml:"trivy"`
-	OS      OSSource      `yaml:"os"`
-	News    NewsSource    `yaml:"news"`
+	GHSA     GHSASource     `yaml:"ghsa"`
+	OSV      OSVSource      `yaml:"osv"`
+	NVD      NVDSource      `yaml:"nvd"`
+	CVEList  CVEListSource  `yaml:"cvelist"`
+	RSS      RSSSource      `yaml:"rss"`
+	K8sFeed  K8sFeedSource  `yaml:"kubernetes_cve_feed"`
+	KEV      KEVSource      `yaml:"kev"`
+	EPSS     EPSSSource     `yaml:"epss"`
+	Exploits ExploitsSource `yaml:"exploits"`
+	RedHat   RedHatSource   `yaml:"redhat"`
+	Trivy    TrivySource    `yaml:"trivy"`
+	OS       OSSource       `yaml:"os"`
+	News     NewsSource     `yaml:"news"`
 }
 
 type GHSASource struct {
@@ -164,6 +165,15 @@ type TrivySource struct {
 type OSSource struct {
 	Enabled bool    `yaml:"enabled"`
 	MinEPSS float64 `yaml:"min_epss"`
+}
+
+// ExploitsSource flags findings with a public exploit: a Metasploit module
+// or a Nuclei template naming the CVE. An empty URL turns that index off.
+type ExploitsSource struct {
+	Enabled       bool     `yaml:"enabled"`
+	MetasploitURL string   `yaml:"metasploit_url"`
+	NucleiURL     string   `yaml:"nuclei_url"`
+	CacheTTL      Duration `yaml:"cache_ttl"`
 }
 
 type EPSSSource struct {

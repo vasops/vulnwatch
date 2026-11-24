@@ -153,6 +153,9 @@ func (o *Output) item(b *strings.Builder, it report.Item) {
 	if it.KEV {
 		head = append(head, o.c(red+bold, "[KEV]"))
 	}
+	if it.PublicExploit {
+		head = append(head, o.c(red+bold, "[EXPLOIT]"))
+	}
 	if it.EPSS > 0 {
 		head = append(head, fmt.Sprintf("[EPSS %.1f%%]", it.EPSS*100))
 	}
@@ -199,6 +202,9 @@ func (o *Output) openItem(b *strings.Builder, it report.OpenItem) {
 	}
 	if it.KEV {
 		parts = append(parts, o.c(red+bold, "[KEV]"))
+	}
+	if it.PublicExploit {
+		parts = append(parts, o.c(red+bold, "[EXPLOIT]"))
 	}
 	if len(it.Fixed) > 0 {
 		parts = append(parts, "fixed in "+strings.Join(it.Fixed, ", "))

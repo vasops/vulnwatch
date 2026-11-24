@@ -110,6 +110,14 @@ sources:
     base_url: https://api.first.org/data/v1/epss
     batch_size: 100
 
+  exploits:                     # enrichment only
+    enabled: true
+    # Public exploits: a Metasploit module or a Nuclei template names the CVE.
+    # An empty URL turns that index off.
+    metasploit_url: https://raw.githubusercontent.com/rapid7/metasploit-framework/master/db/modules_metadata_base.json
+    nuclei_url: https://raw.githubusercontent.com/projectdiscovery/nuclei-templates/main/cves.json
+    cache_ttl: 12h
+
   # Red Hat's rating and statement (e.g. "only servers with HTTP/2 enabled are
   # affected") for CVEs already found; context for triage and the P1 card.
   redhat:                       # enrichment only

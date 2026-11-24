@@ -104,16 +104,17 @@ func (m *message) addFacts(facts []fact) {
 
 // p1Item is one P1 finding as shown on a card.
 type p1Item struct {
-	ID         string
-	Product    string
-	Constraint string
-	Severity   string
-	CVSS       float64
-	KEV        bool
-	EPSS       float64
-	Fixed      []string
-	Action     string
-	Link       string
+	ID            string
+	Product       string
+	Constraint    string
+	Severity      string
+	CVSS          float64
+	KEV           bool
+	PublicExploit bool
+	EPSS          float64
+	Fixed         []string
+	Action        string
+	Link          string
 	// Scopes is the number of environments the finding is P1 in. With one or
 	// none the card shows Constraint as a Version fact, else the Lines.
 	Scopes int
@@ -187,7 +188,7 @@ func p1Items(r report.Report) []p1Item {
 		it := f.Representative
 		out = append(out, p1Item{
 			ID: f.ID, Product: productName(f.Scopes, it.Scope, it.Product), Constraint: it.Constraint,
-			Severity: it.Severity, CVSS: it.CVSS, KEV: it.KEV, EPSS: it.EPSS, Fixed: it.Fixed,
+			Severity: it.Severity, CVSS: it.CVSS, KEV: it.KEV, PublicExploit: it.PublicExploit, EPSS: it.EPSS, Fixed: it.Fixed,
 			Action: f.Action, Link: advisoryLink(it.Advisories, it.Links),
 			Scopes: len(f.Scopes), Lines: f.Lines, ScopeNames: report.ScopeList(f.Scopes),
 		})
@@ -202,7 +203,7 @@ func p1Items(r report.Report) []p1Item {
 		it := f.Representative
 		out = append(out, p1Item{
 			ID: f.ID, Product: productName(f.Scopes, it.Scope, it.Product), Constraint: it.Constraint,
-			Severity: it.Severity, CVSS: it.CVSS, KEV: it.KEV, EPSS: it.EPSS, Fixed: it.Fixed,
+			Severity: it.Severity, CVSS: it.CVSS, KEV: it.KEV, PublicExploit: it.PublicExploit, EPSS: it.EPSS, Fixed: it.Fixed,
 			Action: f.Action, Link: openItemLink(it),
 			Scopes: len(f.Scopes), Lines: f.Lines, ScopeNames: report.ScopeList(f.Scopes),
 		})
@@ -304,14 +305,19 @@ func buildP1Card(it p1Item) message {
 	if it.CVSS > 0 {
 		cvss = fmt.Sprintf("%.1f", it.CVSS)
 	}
+	var signals []string
+	if it.KEV {
+		signals = append(signals, "exploited in the wild (CISA KEV)")
+	}
+	if it.PublicExploit {
+		signals = append(signals, "public exploit")
+	}
+	if it.EPSS > 0 {
+		signals = append(signals, fmt.Sprintf("EPSS %.1f%%", it.EPSS*100))
+	}
 	exploit := "no known exploitation"
-	switch {
-	case it.KEV && it.EPSS > 0:
-		exploit = fmt.Sprintf("exploited in the wild (CISA KEV) · EPSS %.1f%%", it.EPSS*100)
-	case it.KEV:
-		exploit = "exploited in the wild (CISA KEV)"
-	case it.EPSS > 0:
-		exploit = fmt.Sprintf("EPSS %.1f%%", it.EPSS*100)
+	if len(signals) > 0 {
+		exploit = strings.Join(signals, " · ")
 	}
 	fixed := "no fix released yet"
 	if len(it.Fixed) > 0 {
