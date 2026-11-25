@@ -8,6 +8,7 @@
 *.swo
 *~
 .claude
+.devcontainer
 
 # Generic
 *.log
