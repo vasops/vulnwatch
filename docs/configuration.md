@@ -164,26 +164,45 @@ vulnwatch config dump                                 # the merged result, secre
 `--no-defaults` (`VULNWATCH_NO_DEFAULTS=true`) leaves the built-in files out;
 both kinds of file are then required.
 
+The weekly Slack report (see [Outputs](outputs.md#outputs)) is off by
+default; switch it on in a config override:
+
+```yaml
+# config.yaml
+outputs:
+  slack:
+    weekly:
+      enabled: true   # default false
+      day: monday     # English weekday name, sunday to saturday; checked at load
+```
+
+The day is the job's local time zone (the container's `TZ`, UTC unless set).
+If the very first weekly report after enabling fails to post, the next one
+waits for the following configured weekday. A report sent with
+`run --weekly` on another day is not recorded: it moves neither the
+schedule nor the start of the next report's window, which begins at the
+last report that was due.
+
 ## Environment variables
 
-| Variable                                      | Purpose                                                                                                                        |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `ANTHROPIC_API_KEY`                           | Claude; required for `run` with triage enabled                                                                                 |
-| `GITHUB_TOKEN`                                | GitHub API; recommended                                                                                                        |
-| `NVD_API_KEY`                                 | NVD request spacing 6s → 1s                                                                                                    |
-| `SLACK_BOT_TOKEN`, `SLACK_CHANNEL`            | Slack output: bot token and summary channel ID                                                                                 |
-| `SLACK_ALERT_CHANNEL`                         | channel ID for P1 alerts (default: `SLACK_CHANNEL`)                                                                            |
-| `SLACK_NEWS_CHANNEL`                          | channel ID for `vulnwatch news` (default: `SLACK_CHANNEL`)                                                                     |
-| webhook output's `url_env`/`alert_url_env`/`headers_env` | your own names: the main URL, the P1 alert URL (default: the main URL) and any extra headers — see [Outputs](outputs.md#outputs) |
-| pagerduty output's `routing_key_env`                     | your own name: the PagerDuty Events API v2 integration key — see [Outputs](outputs.md#outputs) |
-| teams output's `url_env`/`alert_url_env`      | your own names: the Workflows webhook URL for the run summary, and for P1 alerts (default: the same URL) — see [Outputs](outputs.md#outputs) |
-| `CLAUDE_MODEL`, `CLAUDE_EFFORT`               | override `triage.model` (`claude-haiku-5-5`) and `triage.effort` (`high`)                                                      |
-| `REPORT_LANGUAGE`, `MAX_LLM_FINDINGS`         | override `triage.language` and `triage.max_findings`                                                                           |
-| `STACK_CONFIG`, `STATE_DB`                    | file locations (defaults `./stack.yaml`, `./vulnwatch.db`)                                                                     |
-| `VULNWATCH_CONFIG`, `VULNWATCH_SOURCES`       | override files layered over the built-in defaults (comma-separated)                                                            |
-| `VULNWATCH_NO_DEFAULTS`                       | `true`: leave the built-in config.yaml and sources.yaml out                                                                    |
-| `VULNWATCH_LOG_LEVEL`, `VULNWATCH_LOG_FORMAT` | see [Logging](cli.md#logging)                                                                                                  |
-| `VULNWATCH_LANDLOCK`                          | `require`: fail when Landlock can't be applied; `false`: run without it; default `true` (see [Security](security.md#security)) |
-| `VULNWATCH_MEMORY_LIMIT`                      | container memory limit in bytes (the chart sets it); the Go soft limit becomes 90% of it unless `GOMEMLIMIT` is set            |
+| Variable                                                 | Purpose                                                                                                                                      |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`                                      | Claude; required for `run` with triage enabled                                                                                               |
+| `GITHUB_TOKEN`                                           | GitHub API; recommended                                                                                                                      |
+| `NVD_API_KEY`                                            | NVD request spacing 6s → 1s                                                                                                                  |
+| `SLACK_BOT_TOKEN`, `SLACK_CHANNEL`                       | Slack output: bot token and summary channel ID                                                                                               |
+| `SLACK_ALERT_CHANNEL`                                    | channel ID for P1 alerts (default: `SLACK_CHANNEL`)                                                                                          |
+| `SLACK_NEWS_CHANNEL`                                     | channel ID for `vulnwatch news` (default: `SLACK_CHANNEL`)                                                                                   |
+| webhook output's `url_env`/`alert_url_env`/`headers_env` | your own names: the main URL, the P1 alert URL (default: the main URL) and any extra headers — see [Outputs](outputs.md#outputs)             |
+| pagerduty output's `routing_key_env`                     | your own name: the PagerDuty Events API v2 integration key — see [Outputs](outputs.md#outputs)                                               |
+| teams output's `url_env`/`alert_url_env`                 | your own names: the Workflows webhook URL for the run summary, and for P1 alerts (default: the same URL) — see [Outputs](outputs.md#outputs) |
+| `CLAUDE_MODEL`, `CLAUDE_EFFORT`                          | override `triage.model` (`claude-haiku-5-5`) and `triage.effort` (`high`)                                                                    |
+| `REPORT_LANGUAGE`, `MAX_LLM_FINDINGS`                    | override `triage.language` and `triage.max_findings`                                                                                         |
+| `STACK_CONFIG`, `STATE_DB`                               | file locations (defaults `./stack.yaml`, `./vulnwatch.db`)                                                                                   |
+| `VULNWATCH_CONFIG`, `VULNWATCH_SOURCES`                  | override files layered over the built-in defaults (comma-separated)                                                                          |
+| `VULNWATCH_NO_DEFAULTS`                                  | `true`: leave the built-in config.yaml and sources.yaml out                                                                                  |
+| `VULNWATCH_LOG_LEVEL`, `VULNWATCH_LOG_FORMAT`            | see [Logging](cli.md#logging)                                                                                                                |
+| `VULNWATCH_LANDLOCK`                                     | `require`: fail when Landlock can't be applied; `false`: run without it; default `true` (see [Security](security.md#security))               |
+| `VULNWATCH_MEMORY_LIMIT`                                 | container memory limit in bytes (the chart sets it); the Go soft limit becomes 90% of it unless `GOMEMLIMIT` is set                          |
 
 Flags beat env vars, env vars beat files.

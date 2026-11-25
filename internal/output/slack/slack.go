@@ -109,6 +109,14 @@ func (o *Output) Render(ctx context.Context, r report.Report) error {
 			}
 			logx.Audit(ctx, o.log, "slack message posted", attrs...)
 		}
+		if w := sub.Weekly; w != nil && ctx.Err() == nil {
+			if err := o.post(ctx, rt.channel, weeklyText(w), weeklyBlocks(w, rt.weeklyTitle(), dash, o.maxText())); err != nil {
+				errs = append(errs, fmt.Errorf("slack weekly %s: %w", rt.channel, err))
+			} else {
+				logx.Audit(ctx, o.log, "slack message posted", "kind", "weekly", "channel", rt.channel, "scopes", strings.TrimPrefix(rt.title, " · "),
+					"text", weeklyText(w))
+			}
+		}
 	}
 	if err := ctx.Err(); err != nil && !slices.ContainsFunc(errs, func(e error) bool { return errors.Is(e, err) }) {
 		errs = append(errs, err) // cancelled between posts

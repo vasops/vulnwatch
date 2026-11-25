@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS reported (
 	first_reported TEXT NOT NULL,
 	last_reported  TEXT NOT NULL,
 	detail         TEXT,
+	last_open      TEXT,
+	closed_at      TEXT,
+	closed_reason  TEXT,
 	PRIMARY KEY (product, id)
 );
 CREATE TABLE IF NOT EXISTS reported_alias (
@@ -75,10 +78,11 @@ CREATE TABLE IF NOT EXISTS news_seen (
 // user_version. Bump it with every schema change. A DB from before
 // versioning (0) is current once migrated; a newer one is refused, as this
 // binary would misread or damage it.
-const schemaVersion = 1
+const schemaVersion = 2
 
 const (
 	keyLastSuccess  = "last_success"
+	keyLastWeekly   = "last_weekly"
 	keySourceWindow = "source_window:" // + source name: where a failed source asks again from
 )
 
@@ -143,6 +147,9 @@ func migrateDB(ctx context.Context, db *sql.DB) error {
 		stmts         []string
 	}{
 		{"reported", "detail", []string{`ALTER TABLE reported ADD COLUMN detail TEXT`}},
+		{"reported", "last_open", []string{`ALTER TABLE reported ADD COLUMN last_open TEXT`}},
+		{"reported", "closed_at", []string{`ALTER TABLE reported ADD COLUMN closed_at TEXT`}},
+		{"reported", "closed_reason", []string{`ALTER TABLE reported ADD COLUMN closed_reason TEXT`}},
 		// The index dropped rejected records: rebuilt from the full dump.
 		{"cvelist_record", "rejected", []string{
 			`ALTER TABLE cvelist_record ADD COLUMN rejected INTEGER NOT NULL DEFAULT 0`,
@@ -417,11 +424,49 @@ type Reported struct {
 	ID            string
 	FirstReported time.Time
 	Detail        Detail
+	// LastOpen is the last run that listed it as open; zero if none did
+	// (never open, or stored before closures were tracked).
+	LastOpen     time.Time
+	ClosedAt     time.Time // zero while open
+	ClosedReason string
+}
+
+// Reasons a finding left the open list.
+const (
+	ClosedFixed       = "fixed"        // the version no longer matches, or the image no longer runs it
+	ClosedRemoved     = "removed"      // the product or its environment left the stack
+	ClosedRejected    = "rejected"     // every CVE ID was rejected
+	ClosedNotRelevant = "not-relevant" // any other way it left the open list
+)
+
+// Key names one stored finding.
+type Key struct{ Product, ID string }
+
+// Closure is a stored finding that is not open any more, and why.
+type Closure struct{ Product, ID, Reason string }
+
+// RunCommit is everything a run writes, in one transaction.
+type RunCommit struct {
+	Records     []Record
+	Baselines   []Baseline
+	LastSuccess bool // set the last successful run to the commit time
+	Windows     []SourceWindow
+	// Open are the stored findings the run lists as open: they get
+	// last_open and lose a closure. Closed get closed_at and a reason when
+	// they were open before and are not closed yet.
+	Open   []Key
+	Closed []Closure
+	Weekly bool // a weekly report went out with this run
 }
 
 // Commit stores reported findings, completed baselines, if setLastSuccess
 // the run timestamp, and the sources' own windows, in one transaction.
 func (s *Store) Commit(ctx context.Context, at time.Time, recs []Record, baselines []Baseline, setLastSuccess bool, windows ...SourceWindow) error {
+	return s.CommitRun(ctx, at, RunCommit{Records: recs, Baselines: baselines, LastSuccess: setLastSuccess, Windows: windows})
+}
+
+// CommitRun stores what a run learned (see RunCommit) in one transaction.
+func (s *Store) CommitRun(ctx context.Context, at time.Time, c RunCommit) error {
 	if s.readOnly {
 		return errors.New("state db is read-only")
 	}
@@ -431,6 +476,7 @@ func (s *Store) Commit(ctx context.Context, at time.Time, recs []Record, baselin
 	}
 	defer tx.Rollback()
 	ts := at.UTC().Format(time.RFC3339Nano)
+	recs, baselines, setLastSuccess, windows := c.Records, c.Baselines, c.LastSuccess, c.Windows
 	for _, r := range recs {
 		snap, err := json.Marshal(r.Snapshot)
 		if err != nil {
@@ -440,7 +486,7 @@ func (s *Store) Commit(ctx context.Context, at time.Time, recs []Record, baselin
 		if err != nil {
 			return err
 		}
-		first, err := collapse(ctx, tx, r, at.UTC())
+		first, folded, err := collapse(ctx, tx, r, at.UTC())
 		if err != nil {
 			return err
 		}
@@ -451,6 +497,13 @@ func (s *Store) Commit(ctx context.Context, at time.Time, recs []Record, baselin
 				first_reported = excluded.first_reported, last_reported = excluded.last_reported, detail = excluded.detail`,
 			r.Product, r.ID, string(snap), r.Snapshot.Hash(), first, ts, string(detail)); err != nil {
 			return err
+		}
+		// The finding is as open or closed as its row open most recently.
+		if folded != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE reported SET last_open = ?, closed_at = ?, closed_reason = ? WHERE product = ? AND id = ?`,
+				folded.lastOpen, folded.closedAt, folded.closedReason, r.Product, r.ID); err != nil {
+				return err
+			}
 		}
 		for _, alias := range r.IDs {
 			if _, err := tx.ExecContext(ctx, `
@@ -489,14 +542,38 @@ func (s *Store) Commit(ctx context.Context, at time.Time, recs []Record, baselin
 			return err
 		}
 	}
+	// Closures before opens: a finding in both is open.
+	for _, cl := range c.Closed {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE reported SET closed_at = ?, closed_reason = ?
+			WHERE product = ? AND id = ? AND last_open IS NOT NULL AND closed_at IS NULL`,
+			ts, cl.Reason, cl.Product, cl.ID); err != nil {
+			return err
+		}
+	}
+	for _, k := range c.Open {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE reported SET last_open = ?, closed_at = NULL, closed_reason = NULL WHERE product = ? AND id = ?`,
+			ts, k.Product, k.ID); err != nil {
+			return err
+		}
+	}
+	if c.Weekly {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO meta (key, value) VALUES (?, ?)
+			ON CONFLICT (key) DO UPDATE SET value = excluded.value`, keyLastWeekly, ts); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 
 // collapse folds every stored row of the record's finding into r.ID: the
 // prior canonical ID (a GHSA that got a CVE) and rows stored under any of
 // its IDs before the sources linked them. It returns the earliest
-// first_reported among them, or at.
-func collapse(ctx context.Context, tx *sql.Tx, r Record, at time.Time) (string, error) {
+// first_reported among them, or at, and the open/closed state of the row
+// open most recently (latest last_open) when that row was folded in.
+func collapse(ctx context.Context, tx *sql.Tx, r Record, at time.Time) (string, *openState, error) {
 	ids := map[string]bool{}
 	for _, id := range append([]string{r.ID, r.PriorID}, r.IDs...) {
 		if id == "" {
@@ -508,35 +585,57 @@ func collapse(ctx context.Context, tx *sql.Tx, r Record, at time.Time) (string, 
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 		case err != nil:
-			return "", err
+			return "", nil, err
 		default:
 			ids[canon] = true
 		}
 	}
 	first := at
+	var (
+		latest     *openState
+		latestOpen time.Time
+	)
 	for _, id := range slices.Sorted(maps.Keys(ids)) {
-		var ts string
-		err := tx.QueryRowContext(ctx, `SELECT first_reported FROM reported WHERE product = ? AND id = ?`, r.Product, id).Scan(&ts)
+		var (
+			ts string
+			st openState
+		)
+		err := tx.QueryRowContext(ctx, `SELECT first_reported, last_open, closed_at, closed_reason FROM reported WHERE product = ? AND id = ?`,
+			r.Product, id).Scan(&ts, &st.lastOpen, &st.closedAt, &st.closedReason)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil && t.Before(first) {
 			first = t
+		}
+		// A row never listed as open never decides the state.
+		if t, err := time.Parse(time.RFC3339Nano, st.lastOpen.String); st.lastOpen.Valid && err == nil && t.After(latestOpen) {
+			st.folded = id != r.ID
+			latest, latestOpen = &st, t
 		}
 		if id == r.ID {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM reported WHERE product = ? AND id = ?`, r.Product, id); err != nil {
-			return "", err
+			return "", nil, err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE reported_alias SET id = ? WHERE product = ? AND id = ?`, r.ID, r.Product, id); err != nil {
-			return "", err
+			return "", nil, err
 		}
 	}
-	return first.Format(time.RFC3339Nano), nil
+	if latest == nil || !latest.folded {
+		return first.Format(time.RFC3339Nano), nil, nil
+	}
+	return first.Format(time.RFC3339Nano), latest, nil
+}
+
+// openState is a stored row's last_open, closed_at and closed_reason.
+type openState struct {
+	lastOpen, closedAt, closedReason sql.NullString
+	folded                           bool // from a row merged into another
 }
 
 // ListReported returns every reported finding that has a stored detail.
@@ -546,7 +645,24 @@ func (s *Store) ListReported(ctx context.Context) ([]Reported, error) {
 	if ok, err := hasDetail(ctx, s.db); err != nil || !ok {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT product, id, first_reported, detail FROM reported WHERE detail IS NOT NULL ORDER BY product, id`)
+	return s.listReported(ctx, false)
+}
+
+// listReported reads the rows with a stored detail, only the closed ones
+// with closedOnly.
+func (s *Store) listReported(ctx context.Context, closedOnly bool) ([]Reported, error) {
+	cols, err := s.closureColumns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	q := `SELECT product, id, first_reported, detail, ` + cols + ` FROM reported WHERE detail IS NOT NULL`
+	if closedOnly {
+		if cols == noClosureColumns {
+			return nil, nil // a read-only DB from before closures were tracked
+		}
+		q += ` AND closed_at IS NOT NULL`
+	}
+	rows, err := s.db.QueryContext(ctx, q+` ORDER BY product, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -554,10 +670,11 @@ func (s *Store) ListReported(ctx context.Context) ([]Reported, error) {
 	var out []Reported
 	for rows.Next() {
 		var (
-			r             Reported
-			first, detail string
+			r                            Reported
+			first, detail                string
+			lastOpen, closedAt, closedBy sql.NullString
 		)
-		if err := rows.Scan(&r.Product, &r.ID, &first, &detail); err != nil {
+		if err := rows.Scan(&r.Product, &r.ID, &first, &detail, &lastOpen, &closedAt, &closedBy); err != nil {
 			return nil, err
 		}
 		if r.FirstReported, err = time.Parse(time.RFC3339Nano, first); err != nil {
@@ -566,9 +683,63 @@ func (s *Store) ListReported(ctx context.Context) ([]Reported, error) {
 		if err := json.Unmarshal([]byte(detail), &r.Detail); err != nil {
 			return nil, fmt.Errorf("decode detail %s/%s: %w", r.Product, r.ID, err)
 		}
+		if lastOpen.Valid {
+			if r.LastOpen, err = time.Parse(time.RFC3339Nano, lastOpen.String); err != nil {
+				return nil, fmt.Errorf("last_open %s/%s: %w", r.Product, r.ID, err)
+			}
+		}
+		if closedAt.Valid {
+			if r.ClosedAt, err = time.Parse(time.RFC3339Nano, closedAt.String); err != nil {
+				return nil, fmt.Errorf("closed_at %s/%s: %w", r.Product, r.ID, err)
+			}
+			r.ClosedReason = closedBy.String
+		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+const noClosureColumns = "NULL, NULL, NULL"
+
+// closureColumns selects last_open, closed_at and closed_reason, or NULLs on
+// a read-only DB that predates them.
+func (s *Store) closureColumns(ctx context.Context) (string, error) {
+	for _, c := range []string{"last_open", "closed_at", "closed_reason"} {
+		if ok, err := hasColumn(ctx, s.db, "reported", c); err != nil || !ok {
+			return noClosureColumns, err
+		}
+	}
+	return "last_open, closed_at, closed_reason", nil
+}
+
+// ClosedBetween returns the findings closed after from and up to until,
+// with their stored detail, in order of closure.
+func (s *Store) ClosedBetween(ctx context.Context, from, until time.Time) ([]Reported, error) {
+	if ok, err := hasDetail(ctx, s.db); err != nil || !ok {
+		return nil, err
+	}
+	rs, err := s.listReported(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	// Compared as times: RFC 3339 strings with fractions do not sort as text.
+	rs = slices.DeleteFunc(rs, func(r Reported) bool { return !r.ClosedAt.After(from) || r.ClosedAt.After(until) })
+	slices.SortStableFunc(rs, func(a, b Reported) int { return a.ClosedAt.Compare(b.ClosedAt) })
+	return rs, nil
+}
+
+// LastWeekly returns when the last weekly report went out.
+func (s *Store) LastWeekly(ctx context.Context) (time.Time, bool, error) {
+	var v string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, keyLastWeekly).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	t, err := time.Parse(time.RFC3339Nano, v)
+	return t, err == nil, err
 }
 
 // GetCache implements sources.Cache.

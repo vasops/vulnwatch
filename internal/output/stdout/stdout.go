@@ -140,6 +140,9 @@ func (o *Output) Text(r report.Report) string {
 			p("  ! %s\n", w)
 		}
 	}
+	if r.Weekly != nil {
+		o.weekly(&b, r.Weekly)
+	}
 	return b.String()
 }
 

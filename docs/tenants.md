@@ -101,6 +101,13 @@ stack nested under `tenants.acme.environments.prod`.
   environments with their versions, and one P1 card, listing only the
   environments where the finding is P1. Each channel lists only its own
   environments: acme's channel never shows globex.
+- **Weekly report.** With `outputs.slack.weekly.enabled`, a tenant's channel
+  also gets its weekly report: its open findings, the ones first reported and
+  the ones closed in the last seven days, and the five open the longest
+  among the older ones, only for its own environments (see
+  [Outputs](outputs.md#outputs)). The default
+  channel gets the local stack and tenants without a channel, plus the
+  closed findings of environments no longer in the stack.
 - **Trivy is local.** Image findings belong to the local stack only. A
   tenant's kernel is watched from its `os` section, like the local one.
 - **Compatible.** A stack.yaml without `tenants` is one tenant, `local/default`.

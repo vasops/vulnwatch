@@ -113,6 +113,33 @@ flowchart LR
   class closed muted
 ```
 
+### Closed findings
+
+Every run records which stored findings it lists as open (still open, new,
+updated, and the ones only counted because they can't be tracked). A finding
+that was open in an earlier run and is not open now is recorded as closed,
+with the time and a reason; the weekly report
+([Slack](outputs.md#outputs)) lists the closures of its week.
+
+| Reason         | When                                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------------------ |
+| `fixed`        | the version we run no longer matches, or an image-only finding's image no longer runs (Trivy answered) |
+| `removed`      | the product or its tenant environment is no longer in the stack                                        |
+| `rejected`     | the CVE list rejected all its CVE IDs                                                                  |
+| `not-relevant` | any other way it left the open list: triaged not relevant, or below `min_cvss`                         |
+
+- A finding open again (a downgrade, a product added back) loses its closure.
+- A finding that was never listed as open is never closed.
+- Nothing is closed in a dry run, in a run limited with `--product` (the
+  other products would look removed), or in a run that fails before writing
+  the state. While the image source fails, image-only findings stay open.
+- Tracking starts with the first run of the version that has it: findings
+  stored before have no open record, so nothing is closed in that first run
+  and closures from before the upgrade are not known.
+- A closed finding keeps the tenant and environment it ran in, also when the
+  environment left the stack; its weekly entry then goes to the default
+  channel.
+
 ## Sources
 
 | Source                                                  | Used for                                                                                                                                           | Auth                       |

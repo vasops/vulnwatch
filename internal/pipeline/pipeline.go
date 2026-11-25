@@ -354,6 +354,9 @@ type Options struct {
 	// WholeStack: Products is the whole stack (no --product), so baselines
 	// of products no longer in it are deleted.
 	WholeStack bool
+	// Weekly (--weekly) builds the weekly report whatever the day and
+	// outputs.slack.weekly.enabled say.
+	Weekly bool
 }
 
 // Run executes the full pipeline and returns the report it rendered.
@@ -361,7 +364,8 @@ type Options struct {
 // Claude answered none of its triage calls (the report is then rendered
 // and the state written all the same).
 func Run(ctx context.Context, o Options) (*report.Report, error) {
-	now := o.Now().UTC()
+	start := o.Now() // its time zone decides the weekly report's day
+	now := start.UTC()
 	byName := map[string]catalog.Product{} // by Key()
 	for _, p := range o.Products {
 		byName[p.Key()] = p
@@ -614,9 +618,20 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 		baseUnknown int
 	)
 	reportedNow := map[string]bool{}
-	for _, t := range todo {
+	cl := newClosures()
+	for i, t := range todo {
 		reportedNow[t.f.Product+"/"+t.f.ID] = true
 		reportedNow[t.f.Product+"/"+t.priorID] = true
+		// Open exactly when the report lists it (relevant: no collapses).
+		if results[items[i].Key()].Relevant != "no" {
+			cl.markOpen(t.f.Product, t.f.ID)
+			continue
+		}
+		reason := state.ClosedNotRelevant
+		if t.f.Match == string(match.NotAffected) {
+			reason = state.ClosedFixed
+		}
+		cl.markGone(t.f.Product, t.f.ID, append(t.f.IDs(), t.priorID), reason)
 	}
 	for _, h := range history {
 		p := byName[h.f.Product]
@@ -637,8 +652,12 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 		case openListed:
 			it.FirstSeen = h.prior == nil
 			baseOpen = append(baseOpen, it)
+			cl.markOpen(h.f.Product, h.f.ID)
 		case openCounted:
 			baseUnknown++
+			cl.markOpen(h.f.Product, h.f.ID)
+		default:
+			cl.markGone(h.f.Product, h.f.ID, append(h.f.IDs(), rec.PriorID), dropReason(st))
 		}
 	}
 	var retryRecs []state.Record
@@ -654,13 +673,21 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 		switch it, st := openItem(p, h.f.ID, d, h.prior.FirstReported, h.f.InImage()); st {
 		case openListed:
 			baseOpen = append(baseOpen, it)
+			cl.markOpen(h.f.Product, h.f.ID)
 		case openCounted:
 			baseUnknown++
+			cl.markOpen(h.f.Product, h.f.ID)
+		default:
+			cl.markGone(h.f.Product, h.f.ID, append(h.f.IDs(), h.prior.ID), dropReason(st))
 		}
 	}
 
 	// Still open: findings reported earlier that still affect the stack.
-	open, openUnknown, err := stillOpen(ctx, o.Store, byName, reportedNow, img, o.Log)
+	reported, err := o.Store.ListReported(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("state: still open: %w", err)
+	}
+	open, openUnknown, err := stillOpen(ctx, o.Store, reported, byName, reportedNow, img, cl, o.Log)
 	if err != nil {
 		return nil, fmt.Errorf("state: still open: %w", err)
 	}
@@ -690,6 +717,15 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 		meta.Mode = report.ModeBootstrap
 	case o.DryRun:
 		meta.Mode = report.ModeDryRun
+	}
+	weekly, err := planWeekly(ctx, o, start)
+	if err != nil {
+		return nil, fmt.Errorf("state: weekly report: %w", err)
+	}
+	if weekly.send {
+		if meta.Weekly, err = weeklyInput(ctx, o, weekly.from, start, cl, reported); err != nil {
+			return nil, fmt.Errorf("state: weekly report: %w", err)
+		}
 	}
 	rep := report.Build(meta, entries)
 
@@ -751,7 +787,11 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 		o.Log.Warn("sources failed: they keep their window start and ask again from there next run",
 			"sources", slices.Sorted(maps.Keys(failedSrc)), "products", len(delta.Failed))
 	}
-	if err := o.Store.Commit(ctx, now, recs, done, true, windows...); err != nil {
+	openKeys, closed := cl.commit(o.WholeStack, reported)
+	if err := o.Store.CommitRun(ctx, now, state.RunCommit{
+		Records: recs, Baselines: done, LastSuccess: true, Windows: windows,
+		Open: openKeys, Closed: closed, Weekly: weekly.record,
+	}); err != nil {
 		return &rep, fmt.Errorf("persist state: %w", err)
 	}
 	// A product removed and added again gets its full history checked anew.
@@ -878,12 +918,9 @@ func sourceStats(srcs []sources.Source, enr []sources.Enricher, raw []finding.Fi
 // the new ones or the baseline instead.
 // Image-only findings stay open exactly while Trivy still finds them; when
 // the image source didn't answer, they are kept as they were. Findings
-// whose CVE IDs the CVE list has all rejected are closed.
-func stillOpen(ctx context.Context, store *state.Store, byName map[string]catalog.Product, skip map[string]bool, img imageState, log *slog.Logger) ([]report.OpenItem, int, error) {
-	recs, err := store.ListReported(ctx)
-	if err != nil {
-		return nil, 0, err
-	}
+// whose CVE IDs the CVE list has all rejected are closed. cl learns which
+// of recs are open and why the others are not.
+func stillOpen(ctx context.Context, store *state.Store, recs []state.Reported, byName map[string]catalog.Product, skip map[string]bool, img imageState, cl *closures, log *slog.Logger) ([]report.OpenItem, int, error) {
 	var cves []string
 	for _, r := range recs {
 		cves = append(cves, r.Detail.Finding.CVEs()...)
@@ -897,19 +934,25 @@ func stillOpen(ctx context.Context, store *state.Store, byName map[string]catalo
 		unknown int
 	)
 	for _, r := range recs {
+		if skip[r.Product+"/"+r.ID] {
+			continue
+		}
 		p, ok := byName[r.Product]
-		if !ok || skip[r.Product+"/"+r.ID] {
+		if !ok {
+			cl.markGone(r.Product, r.ID, nil, state.ClosedRemoved)
 			continue
 		}
 		if ids := r.Detail.Finding.CVEs(); len(ids) > 0 && !slices.ContainsFunc(ids, func(id string) bool { return !rejected[id] }) {
 			logx.Audit(ctx, log, "advisory rejected", "tenant", p.Scope.Tenant, "environment", p.Scope.Environment,
 				"product", p.Name, "id", r.ID, "rejected", ids)
+			cl.markGone(r.Product, r.ID, nil, state.ClosedRejected)
 			continue
 		}
 		inImage := false
 		if r.Detail.Finding.ImageOnly() {
 			running, ok := img.stillRunning(r.Product, r.ID)
 			if ok && !running {
+				cl.markGone(r.Product, r.ID, nil, state.ClosedFixed)
 				continue // fixed: no running image contains it any more
 			}
 			inImage = true
@@ -917,8 +960,12 @@ func stillOpen(ctx context.Context, store *state.Store, byName map[string]catalo
 		switch it, st := openItem(p, r.ID, r.Detail, r.FirstReported, inImage); st {
 		case openListed:
 			open = append(open, it)
+			cl.markOpen(r.Product, r.ID)
 		case openCounted:
 			unknown++
+			cl.markOpen(r.Product, r.ID)
+		default:
+			cl.markGone(r.Product, r.ID, nil, dropReason(st))
 		}
 	}
 	return open, unknown, nil
@@ -1007,9 +1054,10 @@ func AdvisoryLinks(cfg *config.Config) report.AdvisoryLinks {
 
 // Outcomes of openItem.
 const (
-	openDropped = iota // not affected, not relevant or below min_cvss
-	openCounted        // can't be tracked: counted, not listed
-	openListed         // affects (or may affect) the deployed version
+	openDropped     = iota // not relevant or below min_cvss
+	openCounted            // can't be tracked: counted, not listed
+	openListed             // affects (or may affect) the deployed version
+	openNotAffected        // the deployed version is not affected
 )
 
 // openItem decides whether a known finding still affects the product as
@@ -1033,7 +1081,7 @@ func openItem(p catalog.Product, id string, d state.Detail, firstReported time.T
 	noData := !f.HasVersionData() && !inImage
 	switch {
 	case res.Status == match.NotAffected:
-		return report.OpenItem{}, openDropped
+		return report.OpenItem{}, openNotAffected
 	case res.Status == match.Unknown && p.Constraint.Any():
 		return report.OpenItem{}, openCounted
 	case res.Status == match.Unknown && noData && (d.Constraint == "" || d.Constraint != p.Constraint.String()):

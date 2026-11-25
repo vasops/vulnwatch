@@ -7,6 +7,12 @@
 // stack.yaml declares what we run.
 package config
 
+import (
+	"slices"
+	"strings"
+	"time"
+)
+
 // SchemaVersion is the only supported configuration schema version.
 const SchemaVersion = 1
 
@@ -252,7 +258,29 @@ type SlackOutput struct {
 	PostInterval    Duration `yaml:"post_interval"`
 	// DashboardURL is linked from every message; {from} and {to} become
 	// now-30d and now.
-	DashboardURL string `yaml:"dashboard_url"`
+	DashboardURL string      `yaml:"dashboard_url"`
+	Weekly       SlackWeekly `yaml:"weekly"`
+}
+
+// SlackWeekly is the weekly report the daily run posts to every route.
+type SlackWeekly struct {
+	Enabled bool   `yaml:"enabled"`
+	Day     string `yaml:"day"` // English weekday name, e.g. monday
+}
+
+// Weekdays are the names outputs.slack.weekly.day accepts.
+var Weekdays = []string{"sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"}
+
+// Weekday is Day as a time.Weekday, Monday when unset (a config written
+// before the setting, without the built-in defaults); ok is false for an
+// unknown name.
+func (w SlackWeekly) Weekday() (time.Weekday, bool) {
+	day := strings.ToLower(strings.TrimSpace(w.Day))
+	if day == "" {
+		return time.Monday, true
+	}
+	i := slices.Index(Weekdays, day)
+	return time.Weekday(max(i, 0)), i >= 0
 }
 
 // ProductDefaults are the per-product triage context defaults. Pointer
