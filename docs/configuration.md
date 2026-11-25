@@ -164,6 +164,18 @@ vulnwatch config dump                                 # the merged result, secre
 `--no-defaults` (`VULNWATCH_NO_DEFAULTS=true`) leaves the built-in files out;
 both kinds of file are then required.
 
+`sources.exploits` flags findings whose CVE has a public exploit, from
+Metasploit's `modules_metadata_base.json` and Nuclei's `cves.json`:
+
+```yaml
+sources:
+  exploits:
+    enabled: true
+    metasploit_url: https://raw.githubusercontent.com/rapid7/metasploit-framework/master/db/modules_metadata_base.json
+    nuclei_url: https://raw.githubusercontent.com/projectdiscovery/nuclei-templates/main/cves.json
+    cache_ttl: 12h   # an empty URL turns that index off
+```
+
 ## Environment variables
 
 | Variable                                      | Purpose                                                                                                                        |

@@ -290,6 +290,7 @@ func (c *Config) Validate() error {
 	need(s.K8sFeed.Enabled, "sources.kubernetes_cve_feed.url", s.K8sFeed.URL)
 	need(s.KEV.Enabled, "sources.kev.url", s.KEV.URL)
 	need(s.EPSS.Enabled, "sources.epss.base_url", s.EPSS.BaseURL)
+	need(s.Exploits.Enabled, "sources.exploits.metasploit_url or sources.exploits.nuclei_url", strings.TrimSpace(s.Exploits.MetasploitURL)+strings.TrimSpace(s.Exploits.NucleiURL))
 	need(s.CVEList.Enabled, "sources.cvelist.releases_url", s.CVEList.ReleasesURL)
 	need(s.CVEList.Enabled, "sources.cvelist.records_url", s.CVEList.RecordsURL)
 	if s.NVD.MaxInFlight < 0 || s.NVD.Timeout < 0 || s.NVD.Budget < 0 {

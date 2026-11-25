@@ -313,12 +313,12 @@
     },
     {
       "type": "stat",
-      "title": "Open, exploited (KEV)",
+      "title": "KEV",
       "description": "Open findings listed in CISA KEV (exploited in the wild), across all tenants.",
       "gridPos": {
         "x": 12,
         "y": 1,
-        "w": 4,
+        "w": 2,
         "h": 4
       },
       "targets": [
@@ -365,6 +365,65 @@
         "textMode": "value"
       },
       "id": 5,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Public exploit",
+      "description": "Open findings with a public exploit (Metasploit module or Nuclei template), across all tenants.",
+      "gridPos": {
+        "x": 14,
+        "y": 1,
+        "w": 2,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(vulnwatch_findings_open_public_exploit{job=~\"$job\",tenant=~\"$tenant\"})",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "id": 14,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1061,7 +1120,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "count by (product, id, title, severity, kev, fixed, nvd_url, github_url) (count by (tenant, environment, product, id, title, severity, kev, fixed, nvd_url, github_url) (vulnwatch_finding_first_reported_timestamp_seconds{job=~\"$job\",tenant=~\"$tenant\"}))",
+          "expr": "count by (product, id, title, severity, kev, public_exploit, fixed, nvd_url, github_url) (count by (tenant, environment, product, id, title, severity, kev, public_exploit, fixed, nvd_url, github_url) (vulnwatch_finding_first_reported_timestamp_seconds{job=~\"$job\",tenant=~\"$tenant\"}))",
           "refId": "A",
           "legendFormat": "",
           "instant": true,
@@ -1083,9 +1142,10 @@
               "title": 3,
               "severity": 4,
               "kev": 5,
-              "fixed": 6,
-              "nvd_url": 7,
-              "github_url": 8
+              "fixed": 7,
+              "nvd_url": 8,
+              "github_url": 9,
+              "public_exploit": 6
             },
             "renameByName": {
               "Value": "Tenant environments",
@@ -1094,6 +1154,7 @@
               "title": "Title",
               "severity": "Severity",
               "kev": "KEV",
+              "public_exploit": "Public exploit",
               "fixed": "Fixed in"
             }
           }
@@ -1239,7 +1300,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(max by (tenant, environment, product, constraint, id, title, priority, severity, cvss, kev, fixed, image, nvd_url, github_url) (vulnwatch_finding_first_reported_timestamp_seconds{job=~\"$job\",tenant=~\"$tenant\",priority=~\"$priority\"}) > (time() - $__range_s)) * 1000",
+          "expr": "(max by (tenant, environment, product, constraint, id, title, priority, severity, cvss, kev, public_exploit, fixed, image, nvd_url, github_url) (vulnwatch_finding_first_reported_timestamp_seconds{job=~\"$job\",tenant=~\"$tenant\",priority=~\"$priority\"}) > (time() - $__range_s)) * 1000",
           "refId": "A",
           "legendFormat": "",
           "instant": true,
@@ -1266,10 +1327,11 @@
               "severity": 8,
               "cvss": 9,
               "kev": 10,
-              "fixed": 11,
-              "image": 12,
-              "nvd_url": 13,
-              "github_url": 14
+              "fixed": 12,
+              "image": 13,
+              "nvd_url": 14,
+              "github_url": 15,
+              "public_exploit": 11
             },
             "renameByName": {
               "Value": "First reported",
@@ -1283,6 +1345,7 @@
               "severity": "Severity",
               "cvss": "CVSS",
               "kev": "KEV",
+              "public_exploit": "Public exploit",
               "fixed": "Fixed in",
               "image": "Image"
             }

@@ -18,18 +18,19 @@ import (
 
 // AuditFinding is one advisory that affects, or may affect, a product.
 type AuditFinding struct {
-	ID       string   `json:"id"`
-	Aliases  []string `json:"aliases,omitempty"`
-	Title    string   `json:"title"`
-	Match    string   `json:"match"` // affected | unknown (depends on the exact version)
-	Detail   string   `json:"match_detail"`
-	Priority string   `json:"priority"` // rule-based
-	Severity string   `json:"severity"`
-	CVSS     float64  `json:"cvss,omitempty"`
-	KEV      bool     `json:"kev"`
-	EPSS     float64  `json:"epss,omitempty"`
-	Fixed    []string `json:"fixed,omitempty"`
-	Link     string   `json:"link,omitempty"`
+	ID            string   `json:"id"`
+	Aliases       []string `json:"aliases,omitempty"`
+	Title         string   `json:"title"`
+	Match         string   `json:"match"` // affected | unknown (depends on the exact version)
+	Detail        string   `json:"match_detail"`
+	Priority      string   `json:"priority"` // rule-based
+	Severity      string   `json:"severity"`
+	CVSS          float64  `json:"cvss,omitempty"`
+	KEV           bool     `json:"kev"`
+	PublicExploit bool     `json:"public_exploit"`
+	EPSS          float64  `json:"epss,omitempty"`
+	Fixed         []string `json:"fixed,omitempty"`
+	Link          string   `json:"link,omitempty"`
 	// Advisories are the NVD and GitHub pages for the finding's IDs.
 	Advisories []report.Advisory `json:"advisories,omitempty"`
 	// Versions lists which deployed versions it affects, for products
@@ -106,7 +107,7 @@ func Audit(ctx context.Context, srcs []sources.Source, enr []sources.Enricher, p
 		r.Checked++
 		noData := !f.HasVersionData()
 		switch {
-		case f.CVSS > 0 && f.CVSS < p.MinCVSS && !f.KEV:
+		case f.CVSS > 0 && f.CVSS < p.MinCVSS && !f.KEV && !f.PublicExploit:
 			r.BelowThreshold++
 			continue
 		case f.Match == string(match.NotAffected):
@@ -123,7 +124,7 @@ func Audit(ctx context.Context, srcs []sources.Source, enr []sources.Enricher, p
 		af := AuditFinding{
 			ID: f.ID, Aliases: f.Aliases, Title: f.Title, Match: f.Match, Detail: f.MatchDetail,
 			Priority: triage.Deterministic(triage.Item{Finding: f, Product: p}).Priority,
-			Severity: f.Severity, CVSS: f.CVSS, KEV: f.KEV, EPSS: f.EPSS, Fixed: f.Fixed,
+			Severity: f.Severity, CVSS: f.CVSS, KEV: f.KEV, PublicExploit: f.PublicExploit, EPSS: f.EPSS, Fixed: f.Fixed,
 		}
 		if len(f.References) > 0 {
 			af.Link = f.References[0]

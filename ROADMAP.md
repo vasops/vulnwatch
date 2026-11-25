@@ -37,8 +37,6 @@ tool built for that (see Integrations).
   and trivy-operator stop reporting them.
 - **Owners:** an `owner` per product, alerts routed to that team's channel.
 - **SLAs:** maximum days open per priority, with alerts when exceeded.
-- **Exploit signals:** public exploits (Metasploit, Nuclei templates) as a
-  third signal next to KEV and EPSS.
 - **Other models for triage:** providers other than Claude, local models
   included.
 

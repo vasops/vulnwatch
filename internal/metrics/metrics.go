@@ -126,11 +126,13 @@ func Registry(r Run) *Metrics {
 	// a value, not an absent series.
 	open := gauge("findings_open", "Findings currently affecting the stack (new in this run or still open), by product and priority.", "tenant", "environment", "product", "priority")
 	openKEV := gauge("findings_open_kev", "Open findings listed in CISA KEV (exploited in the wild), by product.", "tenant", "environment", "product")
+	openExploit := gauge("findings_open_public_exploit", "Open findings with a public exploit (Metasploit module or Nuclei template), by product.", "tenant", "environment", "product")
 	oldest := gauge("findings_open_oldest_days", "Days since vulnwatch first reported the oldest open finding, by product.", "tenant", "environment", "product")
 	untriaged := gauge("findings_untriaged", "Findings in the last run that Claude did not triage (rule-based priority).")
 	type agg struct {
 		byPrio  map[string]int
 		kev     int
+		exploit int
 		oldDays int
 	}
 	per := map[[3]string]*agg{} // tenant, environment, product
@@ -153,6 +155,9 @@ func Registry(r Run) *Metrics {
 		if it.KEV {
 			a.kev++
 		}
+		if it.PublicExploit {
+			a.exploit++
+		}
 		if !it.Triaged {
 			nUntriaged++
 		}
@@ -165,6 +170,9 @@ func Registry(r Run) *Metrics {
 		if it.KEV {
 			a.kev++
 		}
+		if it.PublicExploit {
+			a.exploit++
+		}
 		a.oldDays = max(a.oldDays, it.DaysOpen)
 	}
 	untriaged.WithLabelValues().Set(float64(nUntriaged))
@@ -175,6 +183,7 @@ func Registry(r Run) *Metrics {
 			open.WithLabelValues(k[0], k[1], k[2], prio).Set(float64(a.byPrio[prio]))
 		}
 		openKEV.WithLabelValues(k[0], k[1], k[2]).Set(float64(a.kev))
+		openExploit.WithLabelValues(k[0], k[1], k[2]).Set(float64(a.exploit))
 		oldest.WithLabelValues(k[0], k[1], k[2]).Set(float64(a.oldDays))
 	}
 
@@ -185,19 +194,19 @@ func Registry(r Run) *Metrics {
 	// the run that reports it until it is fixed. Every label is a table
 	// column; keep it that way, a Pushgateway holds them all in memory.
 	findingReported := gauge("finding_first_reported_timestamp_seconds", "Findings currently affecting the stack, one series each, with their NVD and GitHub advisory pages; the value is when vulnwatch first reported it (Unix seconds).",
-		"tenant", "environment", "product", "constraint", "id", "title", "priority", "severity", "cvss", "kev", "fixed", "image", "nvd_url", "github_url")
+		"tenant", "environment", "product", "constraint", "id", "title", "priority", "severity", "cvss", "kev", "public_exploit", "fixed", "image", "nvd_url", "github_url")
 	for _, it := range rep.Items() {
 		nvd, gh := advisoryURLs(it.Advisories)
 		t, e := scopeLabels(it.Tenant, it.Environment)
 		findingReported.WithLabelValues(t, e, it.Product, it.Constraint, it.ID, it.Title, it.Priority, it.Severity, cvss(it.CVSS),
-			strconv.FormatBool(it.KEV), strings.Join(it.Fixed, ", "), imageLabel(len(it.Packages) > 0, it.ImageOnly), nvd, gh).
+			strconv.FormatBool(it.KEV), strconv.FormatBool(it.PublicExploit), strings.Join(it.Fixed, ", "), imageLabel(len(it.Packages) > 0, it.ImageOnly), nvd, gh).
 			Set(float64(cmpTime(it.FirstReported, rep.GeneratedAt).Unix()))
 	}
 	for _, it := range rep.Open {
 		nvd, gh := advisoryURLs(it.Advisories)
 		t, e := scopeLabels(it.Tenant, it.Environment)
 		findingReported.WithLabelValues(t, e, it.Product, it.Constraint, it.ID, it.Title, it.Priority, it.Severity, cvss(it.CVSS),
-			strconv.FormatBool(it.KEV), strings.Join(it.Fixed, ", "), imageLabel(len(it.Packages) > 0, it.ImageOnly), nvd, gh).
+			strconv.FormatBool(it.KEV), strconv.FormatBool(it.PublicExploit), strings.Join(it.Fixed, ", "), imageLabel(len(it.Packages) > 0, it.ImageOnly), nvd, gh).
 			Set(float64(cmpTime(it.FirstReported, rep.GeneratedAt).Unix()))
 	}
 

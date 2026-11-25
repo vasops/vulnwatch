@@ -167,7 +167,7 @@ metrics:
     maxRunAgeHours: 26
     sourceFailingFor: 1d
     inventoryMaxAgeDays: 30  # alert when a stack's generated_at is older (stacks without one: no alert)
-    findingAlerts: true  # alerts for open P1 and KEV-listed findings
+    findingAlerts: true  # alerts for open P1, KEV-listed and public exploit findings
     extraRules: []
 
 # --- Pod --------------------------------------------------------------------
@@ -250,7 +250,7 @@ networkPolicy:
       - api.github.com                 # ghsa
       - api.osv.dev                    # osv, os
       - services.nvd.nist.gov          # nvd
-      - raw.githubusercontent.com      # kev
+      - raw.githubusercontent.com      # kev, exploits
       - api.first.org                  # epss
       - access.redhat.com              # redhat, news (security bulletins)
       - cert.europa.eu                 # news (CERT-EU advisories)

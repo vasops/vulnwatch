@@ -62,16 +62,17 @@ type SummaryPayload struct {
 // P1Payload is one P1 finding (new/updated, or found by a full-history
 // check): the same data as the Slack P1 card.
 type P1Payload struct {
-	Priority string   `json:"priority"`
-	ID       string   `json:"id"`
-	Product  string   `json:"product"`
-	Severity string   `json:"severity"`
-	CVSS     float64  `json:"cvss,omitempty"`
-	KEV      bool     `json:"kev"`
-	EPSS     float64  `json:"epss,omitempty"`
-	Fixed    []string `json:"fixed,omitempty"`
-	Action   string   `json:"action,omitempty"`
-	Links    []string `json:"links,omitempty"`
+	Priority      string   `json:"priority"`
+	ID            string   `json:"id"`
+	Product       string   `json:"product"`
+	Severity      string   `json:"severity"`
+	CVSS          float64  `json:"cvss,omitempty"`
+	KEV           bool     `json:"kev"`
+	PublicExploit bool     `json:"public_exploit"`
+	EPSS          float64  `json:"epss,omitempty"`
+	Fixed         []string `json:"fixed,omitempty"`
+	Action        string   `json:"action,omitempty"`
+	Links         []string `json:"links,omitempty"`
 }
 
 func New(cfg config.WebhookOutput, s Settings, client *httpx.Client, log *slog.Logger) (*Output, error) {
@@ -186,16 +187,17 @@ func p1Payloads(r report.Report) []P1Payload {
 			continue
 		}
 		out = append(out, P1Payload{
-			Priority: "P1",
-			ID:       it.ID,
-			Product:  report.Named(it.Scope, it.Product),
-			Severity: it.Severity,
-			CVSS:     it.CVSS,
-			KEV:      it.KEV,
-			EPSS:     it.EPSS,
-			Fixed:    it.Fixed,
-			Action:   it.Action,
-			Links:    advisoryAndOtherLinks(it.Advisories, it.Links),
+			Priority:      "P1",
+			ID:            it.ID,
+			Product:       report.Named(it.Scope, it.Product),
+			Severity:      it.Severity,
+			CVSS:          it.CVSS,
+			KEV:           it.KEV,
+			PublicExploit: it.PublicExploit,
+			EPSS:          it.EPSS,
+			Fixed:         it.Fixed,
+			Action:        it.Action,
+			Links:         advisoryAndOtherLinks(it.Advisories, it.Links),
 		})
 	}
 	for _, it := range r.Open {
@@ -203,16 +205,17 @@ func p1Payloads(r report.Report) []P1Payload {
 			continue
 		}
 		out = append(out, P1Payload{
-			Priority: "P1",
-			ID:       it.ID,
-			Product:  report.Named(it.Scope, it.Product),
-			Severity: it.Severity,
-			CVSS:     it.CVSS,
-			KEV:      it.KEV,
-			EPSS:     it.EPSS,
-			Fixed:    it.Fixed,
-			Action:   historyAction(it),
-			Links:    openItemLinks(it),
+			Priority:      "P1",
+			ID:            it.ID,
+			Product:       report.Named(it.Scope, it.Product),
+			Severity:      it.Severity,
+			CVSS:          it.CVSS,
+			KEV:           it.KEV,
+			PublicExploit: it.PublicExploit,
+			EPSS:          it.EPSS,
+			Fixed:         it.Fixed,
+			Action:        historyAction(it),
+			Links:         openItemLinks(it),
 		})
 	}
 	return out

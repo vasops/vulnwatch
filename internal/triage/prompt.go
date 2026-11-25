@@ -23,10 +23,10 @@ Priorities:
 
 Rules:
 - Use the version constraint, version_match and match_detail. "affected" means every version we may run is affected; "not_affected" means none is; "unknown" means it depends on the exact deployed version or data is missing.
-- Weigh exposure (internet vs internal), criticality, CVSS, KEV (known exploited), CISA's SSVC (ssvc_exploitation: none, poc = public proof of concept, active = exploited in the wild; ssvc_automatable; ssvc_technical_impact: partial or total) and EPSS (exploitation probability).
+- Weigh exposure (internet vs internal), criticality, CVSS, KEV (known exploited), public_exploit (a Metasploit module or Nuclei template exists for the CVE), CISA's SSVC (ssvc_exploitation: none, poc = public proof of concept, active = exploited in the wild; ssvc_automatable; ssvc_technical_impact: partial or total) and EPSS (exploitation probability).
 - relevant: "yes" if it applies to us, "no" if it clearly does not (wrong component, unaffected version, feature not used by a typical deployment), "uncertain" otherwise.
 - summary: 3-5 plain-language sentences a non-specialist (e.g. a manager) understands: what an attacker can achieve (steal credentials or data, take over the server or node, read other tenants' data, crash the service), who can do it and from where (anyone on the internet, a logged-in user, someone already on the network or node), and what that would mean for us. No function, file or code names and no exploit mechanics; the technical details are in the linked advisory. If it only matters in an unusual configuration, say so.
-- reasoning: 1-2 sentences on why this priority given our versions, exposure, criticality and exploitation (KEV, EPSS).
+- reasoning: 1-2 sentences on why this priority given our versions, exposure, criticality and exploitation (KEV, public exploit, EPSS).
 - action: one concrete next step, e.g. "Upgrade to 26.1.4" or "No action, not affected".
 - A finding with node_os is about the kernel running on our Kubernetes nodes (product <os>-<release>-kernel); the fix is installing the distribution's fixed kernel package and rebooting the nodes, and every workload runs on those nodes.
 - in_running_images lists vulnerable packages Trivy found in our running images. With an advisory for the product (image_only false) it confirms the vulnerable code runs: weigh it up. With image_only true no advisory for the product exists, only a package inside its image: say which package, and the fix is a newer image (the product's next release or a rebuilt image), not a product version from fixed_versions.
@@ -54,6 +54,7 @@ type promptFinding struct {
 	AffectedRange []string `json:"affected_ranges,omitempty"`
 	Fixed         []string `json:"fixed_versions,omitempty"`
 	KEV           bool     `json:"kev"`
+	PublicExploit bool     `json:"public_exploit,omitempty"`
 	EPSS          float64  `json:"epss"`
 	EPSSPct       float64  `json:"epss_percentile"`
 	SSVCExploit   string   `json:"ssvc_exploitation,omitempty"`
@@ -90,7 +91,7 @@ func buildPrompt(items []Item) (string, []string, error) {
 			Title: f.Title, Description: sources.Truncate(f.Description, 1500),
 			CVSS: f.CVSS, CVSSVector: f.CVSSVector, Severity: f.Severity,
 			AffectedRange: ranges, Fixed: f.Fixed,
-			KEV: f.KEV, EPSS: f.EPSS, EPSSPct: f.EPSSPercentile,
+			KEV: f.KEV, PublicExploit: f.PublicExploit, EPSS: f.EPSS, EPSSPct: f.EPSSPercentile,
 			SSVCExploit: f.SSVCExploitation, SSVCAutomate: f.SSVCAutomatable, SSVCImpact: f.SSVCTechnicalImpact,
 			RHSeverity: f.RedHatSeverity, RHStatement: f.RedHatStatement, RHMitigation: f.RedHatMitigation,
 			InImages: packageLines(f.Packages, 5), ImageOnly: f.ImageOnly(), NodeOS: nodeOS(p),

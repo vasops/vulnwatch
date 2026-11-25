@@ -474,7 +474,7 @@
     {
       "id": 6,
       "type": "stat",
-      "title": "Open, exploited (KEV)",
+      "title": "KEV",
       "description": "Open findings listed in CISA's Known Exploited Vulnerabilities catalog.",
       "datasource": {
         "type": "prometheus",
@@ -483,7 +483,7 @@
       "gridPos": {
         "x": 16,
         "y": 1,
-        "w": 4,
+        "w": 2,
         "h": 4
       },
       "targets": [
@@ -493,6 +493,72 @@
             "uid": "${datasource}"
           },
           "expr": "sum(vulnwatch_findings_open_kev{job=~\"$job\",tenant=~\"$tenant\",environment=~\"$environment\",product=~\"$product\"})",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Public exploit",
+      "description": "Open findings with a public exploit (Metasploit module or Nuclei template).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 1,
+        "w": 2,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(vulnwatch_findings_open_public_exploit{job=~\"$job\",tenant=~\"$tenant\",environment=~\"$environment\",product=~\"$product\"})",
           "refId": "A",
           "legendFormat": "",
           "instant": true,
@@ -633,7 +699,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(max by (tenant, environment, product, constraint, id, title, priority, severity, cvss, kev, fixed, image, nvd_url, github_url) (vulnwatch_finding_first_reported_timestamp_seconds{job=~\"$job\",tenant=~\"$tenant\",environment=~\"$environment\",product=~\"$product\",priority=~\"$priority\"}) > (time() - $__range_s)) * 1000",
+          "expr": "(max by (tenant, environment, product, constraint, id, title, priority, severity, cvss, kev, public_exploit, fixed, image, nvd_url, github_url) (vulnwatch_finding_first_reported_timestamp_seconds{job=~\"$job\",tenant=~\"$tenant\",environment=~\"$environment\",product=~\"$product\",priority=~\"$priority\"}) > (time() - $__range_s)) * 1000",
           "refId": "A",
           "legendFormat": "",
           "instant": true,
@@ -657,13 +723,14 @@
               "severity": 8,
               "cvss": 9,
               "kev": 10,
-              "fixed": 11,
-              "nvd_url": 14,
-              "github_url": 15,
-              "image": 13,
+              "fixed": 12,
+              "nvd_url": 15,
+              "github_url": 16,
+              "image": 14,
               "Value": 0,
               "tenant": 1,
-              "environment": 2
+              "environment": 2,
+              "public_exploit": 11
             },
             "renameByName": {
               "priority": "Priority",
@@ -674,6 +741,7 @@
               "severity": "Severity",
               "cvss": "CVSS",
               "kev": "KEV",
+              "public_exploit": "Public exploit",
               "fixed": "Fixed in",
               "image": "Image",
               "Value": "First reported",
@@ -1305,7 +1373,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max by (tenant, environment, product, constraint, id, title, priority, severity, cvss, kev, fixed, image, nvd_url, github_url) (vulnwatch_finding_first_reported_timestamp_seconds{job=~\"$job\",tenant=~\"$tenant\",environment=~\"$environment\",product=~\"$product\",priority=~\"$priority\"}) * 1000",
+          "expr": "max by (tenant, environment, product, constraint, id, title, priority, severity, cvss, kev, public_exploit, fixed, image, nvd_url, github_url) (vulnwatch_finding_first_reported_timestamp_seconds{job=~\"$job\",tenant=~\"$tenant\",environment=~\"$environment\",product=~\"$product\",priority=~\"$priority\"}) * 1000",
           "refId": "A",
           "legendFormat": "",
           "instant": true,
@@ -1329,13 +1397,14 @@
               "severity": 8,
               "cvss": 9,
               "kev": 10,
-              "fixed": 11,
-              "nvd_url": 13,
-              "github_url": 14,
-              "image": 12,
+              "fixed": 12,
+              "nvd_url": 14,
+              "github_url": 15,
+              "image": 13,
               "Value": 0,
               "tenant": 1,
-              "environment": 2
+              "environment": 2,
+              "public_exploit": 11
             },
             "renameByName": {
               "priority": "Priority",
@@ -1346,6 +1415,7 @@
               "severity": "Severity",
               "cvss": "CVSS",
               "kev": "KEV",
+              "public_exploit": "Public exploit",
               "fixed": "Fixed in",
               "image": "Image",
               "Value": "First reported",

@@ -89,10 +89,10 @@ vulnwatch_findings_untriaged 1
 	wantFindings := `
 # HELP vulnwatch_finding_first_reported_timestamp_seconds Findings currently affecting the stack, one series each, with their NVD and GitHub advisory pages; the value is when vulnwatch first reported it (Unix seconds).
 # TYPE vulnwatch_finding_first_reported_timestamp_seconds gauge
-vulnwatch_finding_first_reported_timestamp_seconds{constraint="26.x",cvss="9.8",environment="default",fixed="26.1.4",github_url="https://example.invalid/gh/GHSA-abcd-efgh-ijkl",id="CVE-2026-1001",image="",kev="true",nvd_url="https://example.invalid/nvd/CVE-2026-1001",priority="P1",product="keycloak",severity="critical",tenant="local",title="Account takeover via crafted <redirect_uri>"} 1791784800
-vulnwatch_finding_first_reported_timestamp_seconds{constraint="26.x",cvss="8.8",environment="default",fixed="",github_url="https://example.invalid/gh/GHSA-mnop-qrst-uvwx",id="CVE-2026-0900",image="",kev="true",nvd_url="https://example.invalid/nvd/CVE-2026-0900",priority="P1",product="keycloak",severity="high",tenant="local",title="Token leak in admin console"} 1790575200
-vulnwatch_finding_first_reported_timestamp_seconds{constraint="3.x",cvss="6.5",environment="default",fixed="3.1.2",github_url="",id="CVE-2026-0800",image="",kev="false",nvd_url="https://example.invalid/nvd/CVE-2026-0800",priority="P3",product="argocd",severity="medium",tenant="local",title="Repo server <script> injection"} 1789192800
-vulnwatch_finding_first_reported_timestamp_seconds{constraint="3.x",cvss="7.5",environment="default",fixed="3.1.8, 3.0.15",github_url="https://example.invalid/gh/GHSA-xxxx-yyyy-zzzz",id="GHSA-xxxx-yyyy-zzzz",image="",kev="false",nvd_url="",priority="P3",product="argocd",severity="high",tenant="local",title="Repo server path traversal"} 1791784800
+vulnwatch_finding_first_reported_timestamp_seconds{constraint="26.x",cvss="9.8",environment="default",fixed="26.1.4",github_url="https://example.invalid/gh/GHSA-abcd-efgh-ijkl",id="CVE-2026-1001",image="",kev="true",nvd_url="https://example.invalid/nvd/CVE-2026-1001",priority="P1",product="keycloak",public_exploit="false",severity="critical",tenant="local",title="Account takeover via crafted <redirect_uri>"} 1791784800
+vulnwatch_finding_first_reported_timestamp_seconds{constraint="26.x",cvss="8.8",environment="default",fixed="",github_url="https://example.invalid/gh/GHSA-mnop-qrst-uvwx",id="CVE-2026-0900",image="",kev="true",nvd_url="https://example.invalid/nvd/CVE-2026-0900",priority="P1",product="keycloak",public_exploit="false",severity="high",tenant="local",title="Token leak in admin console"} 1790575200
+vulnwatch_finding_first_reported_timestamp_seconds{constraint="3.x",cvss="6.5",environment="default",fixed="3.1.2",github_url="",id="CVE-2026-0800",image="",kev="false",nvd_url="https://example.invalid/nvd/CVE-2026-0800",priority="P3",product="argocd",public_exploit="false",severity="medium",tenant="local",title="Repo server <script> injection"} 1789192800
+vulnwatch_finding_first_reported_timestamp_seconds{constraint="3.x",cvss="7.5",environment="default",fixed="3.1.8, 3.0.15",github_url="https://example.invalid/gh/GHSA-xxxx-yyyy-zzzz",id="GHSA-xxxx-yyyy-zzzz",image="",kev="false",nvd_url="",priority="P3",product="argocd",public_exploit="false",severity="high",tenant="local",title="Repo server path traversal"} 1791784800
 `
 	if err := testutil.GatherAndCompare(reg, strings.NewReader(wantFindings), "vulnwatch_finding_first_reported_timestamp_seconds"); err != nil {
 		t.Fatal(err)
@@ -318,7 +318,7 @@ func TestRegistryFindingSeries(t *testing.T) {
 	}
 	want := `vulnwatch_finding_first_reported_timestamp_seconds{constraint="3.x",cvss="6.5",environment="default",fixed="3.1.2",` +
 		`github_url="",id="CVE-2026-0800",image="",kev="false",nvd_url="https://example.invalid/nvd/CVE-2026-0800",` +
-		`priority="P3",product="argocd",severity="medium",tenant="local",title="Repo server <script> injection"} 1.7891928e+09`
+		`priority="P3",product="argocd",public_exploit="false",severity="medium",tenant="local",title="Repo server <script> injection"} 1.7891928e+09`
 	if !slices.Contains(got, want) {
 		t.Fatalf("missing %s in:\n%s", want, strings.Join(got, "\n"))
 	}

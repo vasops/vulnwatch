@@ -504,7 +504,7 @@ func p1Alerts(r report.Report) []alert {
 				}
 				return alertCard(card{
 					id: it.ID, title: it.Title, link: first(it.Links), advisories: it.Advisories, product: name, constraint: it.Constraint,
-					summary: it.Summary, action: f.Action, severity: it.Severity, cvss: it.CVSS, kev: it.KEV, epss: it.EPSS,
+					summary: it.Summary, action: f.Action, severity: it.Severity, cvss: it.CVSS, kev: it.KEV, publicExploit: it.PublicExploit, epss: it.EPSS,
 					redHat: it.RedHatSeverity, redHatStatement: it.RedHatStatement,
 					fixed: it.Fixed, match: it.Match, noData: it.NoVersionData, note: note,
 					packages: it.Packages, imageOnly: it.ImageOnly,
@@ -529,7 +529,7 @@ func p1Alerts(r report.Report) []alert {
 			blocks: func(dash string, maxText int) []slack.Block {
 				return alertCard(card{
 					id: it.ID, title: it.Title, link: it.Link, advisories: it.Advisories, product: name, constraint: it.Constraint,
-					summary: it.Summary, action: f.Action, severity: it.Severity, cvss: it.CVSS, kev: it.KEV, epss: it.EPSS,
+					summary: it.Summary, action: f.Action, severity: it.Severity, cvss: it.CVSS, kev: it.KEV, publicExploit: it.PublicExploit, epss: it.EPSS,
 					fixed: it.Fixed, match: it.Match, noData: it.NoVersionData,
 					packages: it.Packages, imageOnly: it.ImageOnly,
 					note:     "found by the full-history check: this advisory is older, but the version we run is affected",
@@ -619,6 +619,9 @@ func historyAlert(findings []report.Finding[report.OpenItem]) alert {
 				if it.KEV {
 					exploit = " · :warning: KEV"
 				}
+				if it.PublicExploit {
+					exploit += " · :warning: public exploit"
+				}
 				var head1 string
 				var scoped []report.Line
 				if len(f.Lines) == 0 || len(f.Scopes) == 1 && len(f.Lines) == 1 {
@@ -665,7 +668,7 @@ type card struct {
 	summary, action, severity, match     string
 	redHat, redHatStatement              string
 	cvss, epss                           float64
-	kev, noData                          bool
+	kev, publicExploit, noData           bool
 	fixed                                []string
 	advisories                           []report.Advisory
 	note                                 string
@@ -721,6 +724,9 @@ func alertCard(c card, dash string, maxText int) []slack.Block {
 	var exploit []string
 	if c.kev {
 		exploit = append(exploit, ":warning: exploited in the wild (CISA KEV)")
+	}
+	if c.publicExploit {
+		exploit = append(exploit, ":warning: public exploit (Metasploit or Nuclei)")
 	}
 	if c.epss > 0 {
 		exploit = append(exploit, fmt.Sprintf("EPSS %.1f%% (probability in 30 days)", c.epss*100))

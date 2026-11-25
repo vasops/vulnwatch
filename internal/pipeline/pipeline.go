@@ -32,6 +32,7 @@ import (
 	"github.com/vasops/vulnwatch/internal/sources"
 	"github.com/vasops/vulnwatch/internal/sources/cvelist"
 	"github.com/vasops/vulnwatch/internal/sources/epss"
+	"github.com/vasops/vulnwatch/internal/sources/exploits"
 	"github.com/vasops/vulnwatch/internal/sources/ghsa"
 	"github.com/vasops/vulnwatch/internal/sources/k8sfeed"
 	"github.com/vasops/vulnwatch/internal/sources/kev"
@@ -88,6 +89,9 @@ func BuildSources(cfg *config.Config, client *httpx.Client, getenv func(string) 
 	}
 	if s.EPSS.Enabled {
 		enr = append(enr, epss.New(s.EPSS, client))
+	}
+	if s.Exploits.Enabled {
+		enr = append(enr, exploits.New(s.Exploits, client, cache, log))
 	}
 	// After KEV and EPSS: they decide which statements are fetched first.
 	if s.RedHat.Enabled {
@@ -435,19 +439,27 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 	cleanFixed(fs)
 	img := newImageState(o.Sources, warnings)
 	img.note(fs)
-	refresh, err := kevCandidates(ctx, o.Store, deltaProducts, fs, img)
+	exploitsOn := slices.ContainsFunc(o.Enrichers, func(e sources.Enricher) bool { return e.Name() == exploits.Name })
+	refresh, err := kevCandidates(ctx, o.Store, deltaProducts, fs, img, exploitsOn)
 	if err != nil {
 		return nil, fmt.Errorf("state: KEV refresh: %w", err)
 	}
 	fs = img.dropUnfixedImageOnly(fs)
 	o.Log.Info("collected", "raw", len(raw), "deduplicated", len(fs), "source_warnings", len(warnings))
 
-	// 7. Enrich. The KEV catalog also goes over the earlier findings this
-	// run didn't fetch (refresh); those it lists now are re-checked below.
-	kevFailed := false
+	// 7. Enrich. The KEV catalog and the exploit indexes also go over the
+	// earlier findings this run didn't fetch (refresh); those they list now
+	// are re-checked below.
+	type signals struct{ kev, exploit bool }
+	had := make([]signals, len(refresh))
+	for i, f := range refresh {
+		had[i] = signals{f.KEV, f.PublicExploit}
+		refresh[i].PublicExploit = false // decided afresh by the indexes
+	}
+	kevFailed, exploitsFailed := false, false
 	for _, e := range o.Enrichers {
 		target := fs
-		if e.Name() == kev.Name {
+		if e.Name() == kev.Name || e.Name() == exploits.Name {
 			target = slices.Concat(fs, refresh)
 			fs, refresh = target[:len(fs):len(fs)], target[len(fs):]
 		}
@@ -458,6 +470,7 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 			o.Log.Warn("enrichment failed", "source", e.Name(), "err", err)
 			warnings = append(warnings, fmt.Sprintf("%s (enrichment): %v", e.Name(), err))
 			kevFailed = kevFailed || e.Name() == kev.Name
+			exploitsFailed = exploitsFailed || e.Name() == exploits.Name
 		}
 	}
 	if kevFailed {
@@ -465,14 +478,43 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 			return nil, fmt.Errorf("state lookup: %w", err)
 		}
 	}
-	nKEV := len(fs)
-	for _, f := range refresh {
-		if f.KEV {
-			fs = append(fs, f)
+	// An index that couldn't be read says nothing: the stored flag stays, and
+	// what the readable one found still counts.
+	if exploitsFailed {
+		if err := carryPublicExploit(ctx, o.Store, fs); err != nil {
+			return nil, fmt.Errorf("state lookup: %w", err)
+		}
+		for i := range refresh {
+			refresh[i].PublicExploit = refresh[i].PublicExploit || had[i].exploit
 		}
 	}
-	if n := len(fs) - nKEV; n > 0 {
-		o.Log.Info("open findings added to CISA KEV", "count", n)
+	var lostFlags []lostFlag // stored public exploit flag the indexes no longer confirm
+	nKEV, nExploit := 0, 0
+	for i, f := range refresh {
+		newKEV, newExploit := f.KEV && !had[i].kev, f.PublicExploit && !had[i].exploit
+		if newKEV || newExploit {
+			fs = append(fs, f)
+		} else if had[i].exploit && !f.PublicExploit {
+			prior, err := o.Store.Lookup(ctx, f.Product, f.IDs())
+			if err != nil {
+				return nil, fmt.Errorf("state lookup: %w", err)
+			}
+			if prior != nil && prior.Detail != nil {
+				lostFlags = append(lostFlags, lostFlag{p: byName[f.Product], prior: prior})
+			}
+		}
+		if newKEV {
+			nKEV++
+		}
+		if newExploit {
+			nExploit++
+		}
+	}
+	if nKEV > 0 {
+		o.Log.Info("open findings added to CISA KEV", "count", nKEV)
+	}
+	if nExploit > 0 {
+		o.Log.Info("open findings with a new public exploit", "count", nExploit)
 	}
 
 	// Image findings without an advisory, and kernel fixes: only those worth reporting.
@@ -496,7 +538,7 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 		if b := summaries[f.Product]; b != nil {
 			b.Checked++
 		}
-		if p := byName[f.Product]; f.CVSS > 0 && f.CVSS < p.MinCVSS && !f.KEV {
+		if p := byName[f.Product]; f.CVSS > 0 && f.CVSS < p.MinCVSS && !f.KEV && !f.PublicExploit {
 			below++
 			continue
 		}
@@ -541,6 +583,9 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 			if f.KEV && f.Match != string(match.NotAffected) {
 				b.KEV++
 			}
+			if f.PublicExploit && f.Match != string(match.NotAffected) {
+				b.PublicExploit++
+			}
 			// Image findings of a re-checked product are history too: the
 			// image (or Trivy) is new to us, the vulnerabilities are not.
 			if o.Bootstrap || f.Modified.Before(since) || f.ImageOnly() || kernelOnly(f) {
@@ -555,6 +600,12 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 		changes := finding.Changes(prior.Snapshot, f.Snapshot())
 		if len(changes) == 0 {
 			unchanged++
+			if prior.Snapshot.PublicExploit && !f.PublicExploit && prior.Detail != nil {
+				lostFlags = append(lostFlags, lostFlag{p: byName[f.Product], prior: prior})
+				if prior.Detail.Method == triage.MethodLLM && !prior.Detail.Untriaged && f.Match != string(match.NotAffected) {
+					retry = append(retry, historic{f, prior}) // Claude weighs it again, quietly
+				}
+			}
 			if prior.Detail != nil && prior.Detail.Untriaged && f.Match != string(match.NotAffected) {
 				retry = append(retry, historic{f, prior})
 			}
@@ -659,6 +710,32 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 		}
 	}
 
+	// A public exploit the indexes no longer list (or the source is off):
+	// the stored finding is rewritten without the flag and its priority
+	// follows. Not reported: nothing for the operator to act on.
+	var flagRecs []state.Record
+	for _, l := range lostFlags {
+		rec := withoutExploitFlag(l.p, l.prior)
+		reason := "the index no longer lists the CVE"
+		if !exploitsOn {
+			reason = "the source is off"
+		}
+		logx.Audit(ctx, o.Log, "public exploit flag cleared", "reason", reason, "tenant", l.p.Scope.Tenant, "environment", l.p.Scope.Environment,
+			"product", l.p.Name, "id", rec.ID, "priority_before", l.prior.Detail.Priority, "priority_after", rec.Detail.Priority,
+			"reassess", rec.Detail.Untriaged)
+		if reportedNow[l.p.Key()+"/"+l.prior.ID] {
+			continue // stored afresh by the path above
+		}
+		flagRecs = append(flagRecs, rec)
+		reportedNow[rec.Product+"/"+rec.ID] = true
+		switch it, st := openItem(l.p, rec.ID, rec.Detail, l.prior.FirstReported, rec.Detail.Finding.InImage()); st {
+		case openListed:
+			baseOpen = append(baseOpen, it)
+		case openCounted:
+			baseUnknown++
+		}
+	}
+
 	// Still open: findings reported earlier that still affect the stack.
 	open, openUnknown, err := stillOpen(ctx, o.Store, byName, reportedNow, img, o.Log)
 	if err != nil {
@@ -714,7 +791,7 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 		o.Log.Info("dry run: state not updated")
 		return &rep, triageErr
 	}
-	recs := make([]state.Record, 0, len(todo)+len(historyRecs)+len(retryRecs))
+	recs := make([]state.Record, 0, len(todo)+len(historyRecs)+len(retryRecs)+len(flagRecs))
 	for i, t := range todo {
 		r := results[items[i].Key()]
 		recs = append(recs, state.Record{
@@ -724,6 +801,7 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 	}
 	recs = append(recs, historyRecs...)
 	recs = append(recs, retryRecs...)
+	recs = append(recs, flagRecs...)
 	var done []state.Baseline
 	for _, p := range baseProducts {
 		if full.Failed[p.Key()] {
@@ -779,13 +857,13 @@ func auditReported(ctx context.Context, log *slog.Logger, entries []report.Entry
 		logx.Audit(ctx, log, "finding reported", "mode", mode, "tenant", p.Scope.Tenant, "environment", p.Scope.Environment,
 			"product", p.Name, "version", p.Constraint.String(), "id", e.Finding.ID, "priority", e.Triage.Priority,
 			"relevant", e.Triage.Relevant, "decided_by", e.Triage.Method, "change", cmp.Or(e.Change, "new"),
-			"kev", e.Finding.KEV, "cvss", e.Finding.CVSS)
+			"kev", e.Finding.KEV, "public_exploit", e.Finding.PublicExploit, "cvss", e.Finding.CVSS)
 	}
 	for _, it := range open {
 		if it.FirstSeen && it.Priority == "P1" {
 			logx.Audit(ctx, log, "finding reported", "mode", mode, "tenant", it.Tenant, "environment", it.Environment,
 				"product", it.Product, "version", it.Constraint, "id", it.ID, "priority", it.Priority,
-				"change", "found by the full-history check", "kev", it.KEV, "cvss", it.CVSS)
+				"change", "found by the full-history check", "kev", it.KEV, "public_exploit", it.PublicExploit, "cvss", it.CVSS)
 		}
 	}
 }
@@ -925,10 +1003,13 @@ func stillOpen(ctx context.Context, store *state.Store, byName map[string]catalo
 }
 
 // kevCandidates returns the earlier findings of the products checked for
-// changes only that this run didn't fetch, aren't KEV-listed and may still
-// affect the stack. Those the KEV catalog lists now take the changed path
-// ("added to CISA KEV"): an open finding escalates when it is exploited.
-func kevCandidates(ctx context.Context, store *state.Store, products []catalog.Product, fetched []finding.Finding, img imageState) ([]finding.Finding, error) {
+// changes only that this run didn't fetch and may still affect the stack:
+// those not KEV-listed, and with the exploit indexes on (or a stored public
+// exploit flag to re-check) all of them. Those the KEV catalog or an exploit
+// index lists now take the changed path ("added to CISA KEV", "public
+// exploit available"): an open finding escalates when it is exploited. The
+// caller re-checks a stored public exploit flag on the copy.
+func kevCandidates(ctx context.Context, store *state.Store, products []catalog.Product, fetched []finding.Finding, img imageState, exploitsOn bool) ([]finding.Finding, error) {
 	if len(products) == 0 {
 		return nil, nil
 	}
@@ -950,7 +1031,7 @@ func kevCandidates(ctx context.Context, store *state.Store, products []catalog.P
 	for _, r := range recs {
 		p, ok := byName[r.Product]
 		f := r.Detail.Finding
-		if !ok || f.KEV || len(f.CVEs()) == 0 || seen[r.Product+"/"+r.ID] ||
+		if !ok || (f.KEV && !f.PublicExploit && !exploitsOn) || len(f.CVEs()) == 0 || seen[r.Product+"/"+r.ID] ||
 			slices.ContainsFunc(f.IDs(), func(id string) bool { return seen[r.Product+"/"+id] }) {
 			continue
 		}
@@ -991,6 +1072,53 @@ func carryKEV(ctx context.Context, store *state.Store, fs []finding.Finding) err
 	return nil
 }
 
+// carryPublicExploit keeps the stored public exploit flag when an exploit
+// index couldn't be read: otherwise the flag is lost now and its return is
+// reported as "public exploit available". A run that reads the indexes
+// decides afresh (see withoutExploitFlag).
+func carryPublicExploit(ctx context.Context, store *state.Store, fs []finding.Finding) error {
+	for i := range fs {
+		if fs[i].PublicExploit {
+			continue
+		}
+		prior, err := store.Lookup(ctx, fs[i].Product, fs[i].IDs())
+		if err != nil {
+			return err
+		}
+		if prior != nil && prior.Snapshot.PublicExploit {
+			fs[i].PublicExploit = true
+		}
+	}
+	return nil
+}
+
+// lostFlag is a stored finding whose public exploit flag is gone.
+type lostFlag struct {
+	p     catalog.Product
+	prior *state.Prior
+}
+
+// withoutExploitFlag rewrites a stored finding without its public exploit
+// flag. A rule-based verdict gets the priority the rules give now. Claude's
+// verdict (a guard-raised one included) keeps its priority and explanation
+// and is marked as owed a new verdict, like a finding Claude gave none for:
+// a later run with budget left asks again without reporting it.
+func withoutExploitFlag(p catalog.Product, prior *state.Prior) state.Record {
+	d := *prior.Detail
+	d.Finding.PublicExploit = false
+	if d.Method == triage.MethodLLM {
+		d.Untriaged = true
+	} else {
+		f := d.Finding
+		f.Product = p.Key()
+		f.Match = string(match.Match(p.Constraint, f.Affected, f.AffectedVersions).Status)
+		d.Priority = triage.Deterministic(triage.Item{Finding: f, Product: p}).Priority
+	}
+	snap := prior.Snapshot
+	snap.PublicExploit = false
+	return state.Record{Product: p.Key(), ID: prior.ID, IDs: d.Finding.IDs(), Snapshot: snap, Detail: d}
+}
+
 func cleanFixed(fs []finding.Finding) {
 	for i := range fs {
 		fs[i].Fixed = sources.CleanFixed(fs[i].Fixed)
@@ -1022,7 +1150,7 @@ func openItem(p catalog.Product, id string, d state.Detail, firstReported time.T
 	if d.Method == triage.MethodLLM && d.Relevant == "no" {
 		return report.OpenItem{}, openDropped
 	}
-	if f.CVSS > 0 && f.CVSS < p.MinCVSS && !f.KEV {
+	if f.CVSS > 0 && f.CVSS < p.MinCVSS && !f.KEV && !f.PublicExploit {
 		return report.OpenItem{}, openDropped
 	}
 	res := match.Match(p.Constraint, f.Affected, f.AffectedVersions)
@@ -1054,7 +1182,7 @@ func openItem(p catalog.Product, id string, d state.Detail, firstReported time.T
 	it := report.OpenItem{
 		ID: id, Product: p.Name, Tenant: p.Scope.Tenant, Environment: p.Scope.Environment,
 		Constraint: p.Constraint.String(), Title: f.Title, Fixed: f.Fixed,
-		CVSS: f.CVSS, Severity: f.Severity, KEV: f.KEV, EPSS: f.EPSS, Match: f.Match, NoVersionData: noData, Priority: prio,
+		CVSS: f.CVSS, Severity: f.Severity, KEV: f.KEV, PublicExploit: f.PublicExploit, EPSS: f.EPSS, Match: f.Match, NoVersionData: noData, Priority: prio,
 		FirstReported: firstReported,
 		Aliases:       slices.DeleteFunc(f.IDs(), func(a string) bool { return a == id }),
 		ImageOnly:     f.ImageOnly(),
@@ -1196,7 +1324,7 @@ func kernelOnly(f finding.Finding) bool {
 func filterKernel(fs []finding.Finding, cfg config.OSSource) ([]finding.Finding, int) {
 	n := 0
 	fs = slices.DeleteFunc(fs, func(f finding.Finding) bool {
-		if !kernelOnly(f) || f.KEV || (cfg.MinEPSS > 0 && f.EPSS >= cfg.MinEPSS) {
+		if !kernelOnly(f) || f.KEV || f.PublicExploit || (cfg.MinEPSS > 0 && f.EPSS >= cfg.MinEPSS) {
 			return false
 		}
 		n++
