@@ -2,9 +2,12 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -81,6 +84,7 @@ type env struct {
 	kev      *fakeKEV
 	src      []sources.Source
 	now      time.Time
+	dbPath   string
 }
 
 func setup(t *testing.T) *env {
@@ -99,14 +103,15 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 10, 12, 6, 0, 0, 0, time.UTC)
-	store, err := state.Open(context.Background(), filepath.Join(t.TempDir(), "s.db"), false)
+	dbPath := filepath.Join(t.TempDir(), "s.db")
+	store, err := state.Open(context.Background(), dbPath, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
 	return &env{
 		cfg: cfg, products: products, store: store, out: &captureOutput{}, kev: &fakeKEV{listed: map[string]bool{}},
-		now: now,
+		now: now, dbPath: dbPath,
 		src: []sources.Source{
 			&fakeSource{name: "ghsa", fs: []finding.Finding{
 				{ID: "GHSA-kc-1", Aliases: []string{"CVE-2026-1"}, Product: "keycloak", Title: "kc vuln", CVSS: 8.1, Severity: "high",
@@ -318,6 +323,326 @@ func TestOpenFindingAddedToKEV(t *testing.T) {
 				t.Fatalf("third run: %v %+v open=%+v", err, rep.Items(), rep.Open)
 			}
 		})
+	}
+}
+
+type fakeEPSS struct {
+	scores map[string]float64
+	err    error
+}
+
+func (*fakeEPSS) Name() string { return "epss" }
+func (x *fakeEPSS) Enrich(_ context.Context, fs []finding.Finding) error {
+	if x.err != nil {
+		return x.err
+	}
+	for i := range fs {
+		for _, id := range fs[i].CVEs() {
+			if s, ok := x.scores[id]; ok && s > fs[i].EPSS {
+				fs[i].EPSS = s
+			}
+		}
+	}
+	return nil
+}
+
+// epssEnv reports two keycloak findings (CVE-2026-1 and CVE-2026-5, both
+// P3 by the rules) with EPSS 0.01 and returns the environment; later runs
+// use runEPSS.
+func epssEnv(t *testing.T) (*env, *fakeEPSS) {
+	t.Helper()
+	e := setup(t)
+	e.src[2].(*fakeSource).err = nil
+	ghsa := e.src[0].(*fakeSource)
+	ghsa.fs[0].CVSS, ghsa.fs[0].Severity = 5.0, "medium"
+	e.src[1].(*fakeSource).fs[0].CVSS = 5.0
+	ghsa.fs = append(ghsa.fs, finding.Finding{
+		ID: "CVE-2026-5", Product: "keycloak", Title: "second", CVSS: 5.0, Severity: "medium",
+		Affected: []finding.Range{{Introduced: "26.0.0", Fixed: "26.1.4"}}, Sources: []string{"ghsa"}, Modified: e.now,
+	})
+	ep := &fakeEPSS{scores: map[string]float64{"CVE-2026-1": 0.01, "CVE-2026-5": 0.01}}
+	rep, err := runEPSS(t, e, ep, nil)
+	if err != nil || rep.Total() != 2 {
+		t.Fatalf("first run: %v %+v", err, rep.Items())
+	}
+	for _, it := range rep.Items() {
+		if it.Priority != "P3" {
+			t.Fatalf("first run priority: %+v", it)
+		}
+	}
+	return e, ep
+}
+
+func runEPSS(t *testing.T, e *env, ep *fakeEPSS, mut func(*Options)) (*report.Report, error) {
+	t.Helper()
+	return e.run(t, func(o *Options) {
+		o.Enrichers = []sources.Enricher{e.kev, ep}
+		if mut != nil {
+			mut(o)
+		}
+	})
+}
+
+func TestOpenFindingEPSSCrossesThreshold(t *testing.T) {
+	tests := []struct {
+		name      string
+		first     float64 // stored with the first report
+		now       float64 // EPSS in the second run
+		fetched   bool    // the sources return the advisory again
+		noDetail  bool    // the stored row predates details
+		kevBefore bool    // KEV-listed when first reported
+		kevNow    bool    // listed in the second run
+		want      string  // reported IDs
+		change    string
+	}{
+		{name: "not fetched, crosses", first: 0.01, now: 0.8, want: "CVE-2026-1", change: "EPSS rose to 80% (from 1%)"},
+		{name: "not fetched, already above", first: 0.2, now: 0.9},
+		{name: "not fetched, rises below the threshold", first: 0.01, now: 0.05},
+		{name: "not fetched, falls", first: 0.2, now: 0.01},
+		{name: "fetched again, crosses", first: 0.01, now: 0.8, fetched: true, want: "CVE-2026-1", change: "EPSS rose to 80% (from 1%)"},
+		{name: "fetched again, already above", first: 0.2, now: 0.9, fetched: true},
+		{name: "KEV-listed before, crosses", first: 0.01, now: 0.8, kevBefore: true},
+		{name: "KEV-listed before, fetched again, crosses", first: 0.01, now: 0.8, kevBefore: true, fetched: true},
+		{name: "KEV listing in the same run", first: 0.01, now: 0.8, kevNow: true, want: "CVE-2026-1", change: "added to CISA KEV"},
+		{name: "no stored detail", first: 0.01, now: 0.8, noDetail: true},
+		{name: "no stored detail, fetched again", first: 0.01, now: 0.8, noDetail: true, fetched: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := setup(t)
+			e.src[2].(*fakeSource).err = nil
+			ghsa := e.src[0].(*fakeSource)
+			ghsa.fs[0].CVSS, ghsa.fs[0].Severity = 5.0, "medium"
+			e.src[1].(*fakeSource).fs[0].CVSS = 5.0
+			ep := &fakeEPSS{scores: map[string]float64{"CVE-2026-1": tt.first}}
+			e.kev.listed["CVE-2026-1"] = tt.kevBefore
+			if rep, err := runEPSS(t, e, ep, nil); err != nil || rep.Total() != 1 || rep.Items()[0].Priority != "P3" && tt.first < triage.EPSSHigh && !tt.kevBefore {
+				t.Fatalf("first run: %v %+v", err, rep.Items())
+			}
+			if tt.noDetail {
+				db, err := sql.Open("sqlite", e.dbPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer db.Close()
+				if _, err := db.Exec(`UPDATE reported SET detail = NULL`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !tt.fetched {
+				e.src = nil
+			}
+			e.now = e.now.Add(24 * time.Hour)
+			ep.scores["CVE-2026-1"] = tt.now
+			e.kev.listed["CVE-2026-1"] = tt.kevBefore || tt.kevNow
+			rep, err := runEPSS(t, e, ep, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ids []string
+			for _, it := range rep.Items() {
+				ids = append(ids, it.ID)
+				if it.Change != tt.change {
+					t.Fatalf("change %q, want %q", it.Change, tt.change)
+				}
+				if tt.kevNow != (it.Priority == "P1") || (tt.change != "" && it.Priority > "P2") {
+					t.Fatalf("priority: %+v", it)
+				}
+			}
+			if strings.Join(ids, ",") != tt.want {
+				t.Fatalf("reported %v, want %q", ids, tt.want)
+			}
+			if tt.fetched && rep.Unchanged != 2-len(ids) { // the argocd finding is always unchanged
+				t.Fatalf("unchanged %d with %d reported", rep.Unchanged, len(ids))
+			}
+			// The crossing is reported once.
+			e.now = e.now.Add(24 * time.Hour)
+			if rep, err = runEPSS(t, e, ep, nil); err != nil || !rep.Empty() {
+				t.Fatalf("third run: %v %+v", err, rep.Items())
+			}
+		})
+	}
+}
+
+// The argocd finding is stored as not affected; its EPSS crossing is not
+// reported, fetched again or not. The stack is the same in both runs, so
+// the baseline is complete and the second run is a delta run.
+func TestOpenFindingEPSSNotAffected(t *testing.T) {
+	for _, fetched := range []bool{false, true} {
+		t.Run(fmt.Sprintf("fetched=%v", fetched), func(t *testing.T) {
+			e := setup(t)
+			e.src[2].(*fakeSource).err = nil
+			ep := &fakeEPSS{scores: map[string]float64{"CVE-2026-2": 0.01}}
+			if _, err := runEPSS(t, e, ep, nil); err != nil {
+				t.Fatal(err)
+			}
+			if !fetched {
+				e.src = nil
+			}
+			e.now = e.now.Add(24 * time.Hour)
+			ep.scores["CVE-2026-2"] = 0.8
+			rep, err := runEPSS(t, e, ep, nil)
+			if err != nil || !rep.Empty() {
+				t.Fatalf("%v %+v", err, rep.Items())
+			}
+			if len(rep.Baselines) != 0 {
+				t.Fatalf("the asserted run must not be a full-history check: %+v", rep.Baselines)
+			}
+		})
+	}
+}
+
+func TestImageFindingEPSSCrossesThreshold(t *testing.T) {
+	e := setup(t)
+	e.cfg.Sources.Trivy = config.TrivySource{Enabled: true, MinSeverity: "critical", MinSeverityInternet: "high", MinEPSS: 0.1}
+	trivy := &fakeImageSource{fakeSource: fakeSource{name: finding.SourceTrivy}}
+	trivy.fs = []finding.Finding{imageFinding("CVE-2026-60", "keycloak", "high", 7.5, "1.1", e.now)}
+	e.src = append(e.src[:2], trivy) // without the failing osv source, so the baselines complete
+	ep := &fakeEPSS{scores: map[string]float64{"CVE-2026-60": 0.01}}
+	if _, err := runEPSS(t, e, ep, nil); err != nil {
+		t.Fatal(err)
+	}
+	e.now = e.now.Add(24 * time.Hour)
+	ep.scores["CVE-2026-60"] = 0.8
+	rep, err := runEPSS(t, e, ep, nil)
+	if err != nil || rep.Total() != 1 {
+		t.Fatalf("%v %+v", err, rep.Items())
+	}
+	if it := rep.Items()[0]; it.ID != "CVE-2026-60" || !it.ImageOnly || it.Change != "EPSS rose to 80% (from 1%)" {
+		t.Fatalf("%+v", it)
+	}
+	if len(rep.Baselines) != 0 {
+		t.Fatalf("the asserted run must not be a full-history check: %+v", rep.Baselines)
+	}
+}
+
+func TestOpenFindingEPSSSourceFails(t *testing.T) {
+	e, ep := epssEnv(t)
+	e.src = nil
+	e.now = e.now.Add(24 * time.Hour)
+	ep.scores["CVE-2026-1"], ep.err = 0.9, errors.New("epss unreachable")
+	rep, err := runEPSS(t, e, ep, nil)
+	if err != nil || !rep.Empty() {
+		t.Fatalf("%v %+v", err, rep.Items())
+	}
+	if !strings.Contains(strings.Join(rep.Warnings, " "), "epss (enrichment): epss unreachable") {
+		t.Fatalf("warnings: %v", rep.Warnings)
+	}
+	recs, err := e.store.ListReported(context.Background())
+	if err != nil || len(recs) != 3 {
+		t.Fatalf("%v %+v", err, recs)
+	}
+	for _, r := range recs {
+		if r.Product == "keycloak" && r.Detail.Finding.EPSS != 0.01 {
+			t.Fatalf("stored EPSS lowered or changed: %+v", r.Detail.Finding)
+		}
+	}
+}
+
+// reportedWithNewFix reports the keycloak finding with EPSS 0.5, then
+// returns it from the sources again with a new fixed version, which is
+// reported in the next run whatever the EPSS does.
+func reportedWithNewFix(t *testing.T) (*env, *fakeEPSS) {
+	t.Helper()
+	e := setup(t)
+	e.src[2].(*fakeSource).err = nil
+	ep := &fakeEPSS{scores: map[string]float64{"CVE-2026-1": 0.5}}
+	if rep, err := runEPSS(t, e, ep, nil); err != nil || rep.Total() != 1 || rep.Items()[0].Priority != "P2" {
+		t.Fatalf("first run: %v %+v", err, rep.Items())
+	}
+	e.now = e.now.Add(24 * time.Hour)
+	kc := &e.src[0].(*fakeSource).fs[0]
+	kc.Fixed, kc.Modified = append(kc.Fixed, "26.2.0"), e.now
+	return e, ep
+}
+
+func storedEPSS(t *testing.T, e *env) float64 {
+	t.Helper()
+	recs, err := e.store.ListReported(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range recs {
+		if r.ID == "CVE-2026-1" {
+			return r.Detail.Finding.EPSS
+		}
+	}
+	t.Fatal("CVE-2026-1 not stored")
+	return 0
+}
+
+func TestEPSSCarriedWhileSourceFails(t *testing.T) {
+	e, ep := reportedWithNewFix(t)
+	ep.err = errors.New("epss unreachable")
+	rep, err := runEPSS(t, e, ep, nil)
+	if err != nil || rep.Total() != 1 {
+		t.Fatalf("%v %+v", err, rep.Items())
+	}
+	if it := rep.Items()[0]; it.Change != "fixed version released: 26.2.0" || it.Priority != "P2" || it.EPSS != 0.5 {
+		t.Fatalf("%+v", it)
+	}
+	if !strings.Contains(strings.Join(rep.Warnings, " "), "epss (enrichment): epss unreachable") {
+		t.Fatalf("warnings: %v", rep.Warnings)
+	}
+	if got := storedEPSS(t, e); got != 0.5 {
+		t.Fatalf("stored EPSS %v, want 0.5", got)
+	}
+	// EPSS is back: no rise to report.
+	e.now = e.now.Add(24 * time.Hour)
+	ep.err = nil
+	if rep, err = runEPSS(t, e, ep, nil); err != nil || !rep.Empty() {
+		t.Fatalf("third run: %v %+v", err, rep.Items())
+	}
+}
+
+func TestEPSSNotCarriedWhenSourceHasNoScore(t *testing.T) {
+	e, ep := reportedWithNewFix(t)
+	ep.scores = map[string]float64{}
+	if rep, err := runEPSS(t, e, ep, nil); err != nil || rep.Total() != 1 {
+		t.Fatalf("%v %+v", err, rep.Items())
+	}
+	if got := storedEPSS(t, e); got != 0 {
+		t.Fatalf("stored EPSS %v, want what the run had (0)", got)
+	}
+}
+
+func TestOpenFindingsKEVAndEPSSTogether(t *testing.T) {
+	e, ep := epssEnv(t)
+	e.src = nil
+	e.now = e.now.Add(24 * time.Hour)
+	e.kev.listed["CVE-2026-1"] = true
+	ep.scores["CVE-2026-5"] = 0.8
+	rep, err := runEPSS(t, e, ep, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, it := range rep.Items() {
+		got[it.ID] = it.Change
+	}
+	want := map[string]string{"CVE-2026-1": "added to CISA KEV", "CVE-2026-5": "EPSS rose to 80% (from 1%)"}
+	if !maps.Equal(got, want) {
+		t.Fatalf("reported %v, want %v", got, want)
+	}
+}
+
+func TestEPSSChange(t *testing.T) {
+	tests := []struct {
+		from, to float64
+		want     string
+	}{
+		{0.01, 0.82, "EPSS rose to 82% (from 1%)"},
+		{0.004, 0.1, "EPSS rose to 10% (from <1%)"},
+		{0, 1.0, "EPSS rose to 100% (from 0%)"},
+		{0.096, 0.1, "EPSS rose to 10% (from 9%)"},
+		{0.0999, 0.995, "EPSS rose to 99% (from 9%)"},
+		{0.57, 1.0, "EPSS rose to 100% (from 57%)"},
+		{0, 0, "EPSS rose to 0% (from 0%)"},
+	}
+	for _, tt := range tests {
+		if got := epssChange(tt.from, tt.to); got != tt.want {
+			t.Errorf("epssChange(%v, %v) = %q, want %q", tt.from, tt.to, got, tt.want)
+		}
 	}
 }
 
