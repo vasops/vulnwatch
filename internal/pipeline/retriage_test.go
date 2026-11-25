@@ -12,6 +12,7 @@ import (
 	"github.com/vasops/vulnwatch/internal/catalog"
 	"github.com/vasops/vulnwatch/internal/finding"
 	"github.com/vasops/vulnwatch/internal/match"
+	"github.com/vasops/vulnwatch/internal/report"
 	"github.com/vasops/vulnwatch/internal/state"
 	"github.com/vasops/vulnwatch/internal/triage"
 )
@@ -188,6 +189,55 @@ func TestTriageFailures(t *testing.T) {
 	rep, err = e.run(t, func(o *Options) { o.Triager = triage.New(cfg, fc, log) })
 	if err == nil || fc.calls != 1 || rep.TriageFailures != 1 || !detailOf(t, e, "keycloak", "CVE-2026-1").Untriaged {
 		t.Fatalf("only the new finding is sent: calls=%d failures=%d %v", fc.calls, rep.TriageFailures, err)
+	}
+}
+
+// usageCompleter answers like keyCompleter and reports 10 input and 5
+// output tokens per request.
+type usageCompleter struct {
+	keyCompleter
+	calls int64
+}
+
+func (c *usageCompleter) Complete(ctx context.Context, sys, user string, schema map[string]any) (string, error) {
+	c.calls++
+	return c.keyCompleter.Complete(ctx, sys, user, schema)
+}
+
+func (c *usageCompleter) Usage() triage.Usage {
+	return triage.Usage{Requests: c.calls, InputTokens: 10 * c.calls, OutputTokens: 5 * c.calls, CacheCreationInputTokens: 2 * c.calls}
+}
+
+// The usage covers both triage passes of a run: the new findings and the
+// owed retry. A run without triage reports none.
+func TestTriageUsage(t *testing.T) {
+	e := setup(t)
+	cfg := e.cfg.Triage
+	cfg.Enabled, cfg.Model = true, "claude-test"
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if rep, err := e.run(t, func(o *Options) { o.Triager = triage.New(cfg, &failingCompleter{}, log) }); err == nil || rep.TriageUsage != nil {
+		t.Fatalf("a completer without usage reports none: %v %+v", err, rep.TriageUsage)
+	}
+
+	e.now = e.now.Add(24 * time.Hour)
+	src := e.src[0].(*fakeSource)
+	src.fs = append(src.fs, finding.Finding{ID: "GHSA-kc-2", Product: "keycloak", Title: "new", CVSS: 7.0, Sources: []string{"ghsa"}, Modified: e.now})
+	c := &usageCompleter{}
+	rep, err := e.run(t, func(o *Options) { o.Triager = triage.New(cfg, c, log) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.calls != 2 {
+		t.Fatalf("one request for the new finding, one for the owed retry: %d", c.calls)
+	}
+	want := &report.TriageUsage{Model: "claude-test", Requests: 2, InputTokens: 20, OutputTokens: 10, CacheCreationInputTokens: 4}
+	if rep.TriageUsage == nil || *rep.TriageUsage != *want {
+		t.Fatalf("usage = %+v, want %+v", rep.TriageUsage, want)
+	}
+
+	e.now = e.now.Add(24 * time.Hour)
+	if rep, err = e.run(t, func(o *Options) { o.Triager = nil }); err != nil || rep.TriageUsage != nil {
+		t.Fatalf("a run without triage has no usage: %v %+v", err, rep.TriageUsage)
 	}
 }
 

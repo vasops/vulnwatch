@@ -74,6 +74,9 @@ type Report struct {
 	// API error, or invalid output after the retry. Their findings got the
 	// rule-based priority. Run-wide: every route keeps it.
 	TriageFailures int `json:"triage_failures,omitempty"`
+	// TriageUsage is what the Claude triage requests of the run used; absent
+	// when triage made no request.
+	TriageUsage *TriageUsage `json:"triage_usage,omitempty"`
 	// MultiTenant is set when stack.yaml has tenants: outputs then name
 	// each product's tenant and environment (Scope).
 	MultiTenant bool `json:"multi_tenant,omitempty"`
@@ -81,6 +84,16 @@ type Report struct {
 	Scopes []ScopeInfo `json:"scopes,omitempty"`
 	// Weekly is set when the run sends the weekly report.
 	Weekly *Weekly `json:"weekly,omitempty"`
+}
+
+// TriageUsage is the requests and tokens of the Claude triage in one run.
+type TriageUsage struct {
+	Model                    string `json:"model"`
+	Requests                 int64  `json:"requests"`
+	InputTokens              int64  `json:"input_tokens"`
+	OutputTokens             int64  `json:"output_tokens"`
+	CacheCreationInputTokens int64  `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int64  `json:"cache_read_input_tokens"`
 }
 
 // ScopeInfo is one tenant environment (or the local stack) in the run.
@@ -256,6 +269,7 @@ type Meta struct {
 	KernelFiltered  int
 	SingleSource    map[string]int
 	TriageFailures  int
+	TriageUsage     *TriageUsage
 	// Weekly, when set, asks for the weekly report: its window (From,
 	// Until) and closed findings; Build fills in the rest.
 	Weekly *Weekly
@@ -281,6 +295,7 @@ func Build(m Meta, entries []Entry) Report {
 		KernelFiltered:  m.KernelFiltered,
 		SingleSource:    m.SingleSource,
 		TriageFailures:  m.TriageFailures,
+		TriageUsage:     m.TriageUsage,
 	}
 	seen := map[config.Scope]bool{}
 	for _, p := range m.Products {

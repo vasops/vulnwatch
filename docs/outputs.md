@@ -356,21 +356,23 @@ environment and product):
 | **vulnwatch · overview** ([json](../charts/vulnwatch/dashboards/vulnwatch-overview.json), uid `vulnwatch-overview`) | every tenant at a glance: open P1/P2/P3/P4 and KEV findings, days since the oldest open finding was first seen, the last run and the inventory age per tenant environment; the vulnerabilities affecting the most tenants; what was discovered when, everywhere. A tenant links to its dashboard. |
 | **vulnwatch · tenant** ([json](../charts/vulnwatch/dashboards/vulnwatch.json), uid `vulnwatch`)                     | one tenant (`$tenant`, `$environment`): status, what was discovered when, open findings per product with version and upgrade target, every open finding with NVD/GitHub links, trends and source health.                                                                                          |
 
-| Metric                                                                | Labels                                                                                  | Meaning                                                                         |
-| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `vulnwatch_run_success`                                               | mode                                                                                    | 1 if the run and every output succeeded                                         |
-| `vulnwatch_last_success_timestamp_seconds`                            |                                                                                         | last successful run                                                             |
-| `vulnwatch_tenant_info`                                               | tenant, environment, local                                                              | the watched tenant environments (`local="true"`: the cluster vulnwatch runs in) |
-| `vulnwatch_tenant_inventory_timestamp_seconds`                        | tenant, environment                                                                     | the stack's `generated_at` (00:00 UTC); only stacks that have one               |
-| `vulnwatch_findings_new`                                              | tenant, environment, priority                                                           | reported in the last run                                                        |
-| `vulnwatch_findings_open`                                             | tenant, environment, product, priority                                                  | affecting the stack now                                                         |
-| `vulnwatch_findings_open_kev`, `…_open_unfixed`, `…_open_oldest_days` | tenant, environment, product                                                            | exploited, without a fix, days since the oldest was first seen                  |
-| `vulnwatch_findings_open_image_only`                                  | tenant, environment, product                                                            | open findings only Trivy reports (fixed by a newer image)                       |
-| `vulnwatch_finding_first_reported_timestamp_seconds`                  | tenant, environment, product, id, title, priority, fixed, image, nvd_url, github_url, … | per open finding: first reported time; `image` is `confirmed`, `only` or empty  |
-| `vulnwatch_product_upgrade_info`                                      | tenant, environment, product, constraint, upgrade_to                                    | lowest version that fixes every open finding with a fix                         |
-| `vulnwatch_source_findings`, `vulnwatch_source_errors`                | source                                                                                  | per-source yield and failures                                                   |
-| `vulnwatch_findings_single_source`                                    | source                                                                                  | findings only cvelist or only NVD found in full-history checks (when both run)  |
-| `vulnwatch_product_info`                                              | tenant, environment, product, constraint, exposure, criticality                         | the watched inventory                                                           |
+| Metric                                                                | Labels                                                                                  | Meaning                                                                                    |
+| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `vulnwatch_run_success`                                               | mode                                                                                    | 1 if the run and every output succeeded                                                    |
+| `vulnwatch_last_success_timestamp_seconds`                            |                                                                                         | last successful run                                                                        |
+| `vulnwatch_tenant_info`                                               | tenant, environment, local                                                              | the watched tenant environments (`local="true"`: the cluster vulnwatch runs in)            |
+| `vulnwatch_tenant_inventory_timestamp_seconds`                        | tenant, environment                                                                     | the stack's `generated_at` (00:00 UTC); only stacks that have one                          |
+| `vulnwatch_findings_new`                                              | tenant, environment, priority                                                           | reported in the last run                                                                   |
+| `vulnwatch_findings_open`                                             | tenant, environment, product, priority                                                  | affecting the stack now                                                                    |
+| `vulnwatch_findings_open_kev`, `…_open_unfixed`, `…_open_oldest_days` | tenant, environment, product                                                            | exploited, without a fix, days since the oldest was first seen                             |
+| `vulnwatch_findings_open_image_only`                                  | tenant, environment, product                                                            | open findings only Trivy reports (fixed by a newer image)                                  |
+| `vulnwatch_finding_first_reported_timestamp_seconds`                  | tenant, environment, product, id, title, priority, fixed, image, nvd_url, github_url, … | per open finding: first reported time; `image` is `confirmed`, `only` or empty             |
+| `vulnwatch_product_upgrade_info`                                      | tenant, environment, product, constraint, upgrade_to                                    | lowest version that fixes every open finding with a fix                                    |
+| `vulnwatch_source_findings`, `vulnwatch_source_errors`                | source                                                                                  | per-source yield and failures                                                              |
+| `vulnwatch_findings_single_source`                                    | source                                                                                  | findings only cvelist or only NVD found in full-history checks (when both run)             |
+| `vulnwatch_triage_requests`                                           | model                                                                                   | Claude triage requests that got a response in the last run                                 |
+| `vulnwatch_triage_tokens`                                             | model, type                                                                             | tokens used in the last run; `type` is `input`, `output`, `cache_creation` or `cache_read` |
+| `vulnwatch_product_info`                                              | tenant, environment, product, constraint, exposure, criticality                         | the watched inventory                                                                      |
 
 Also: `vulnwatch_run_timestamp_seconds`, `vulnwatch_run_duration_seconds`,
 `vulnwatch_findings_skipped`, `vulnwatch_findings_untriaged`,
@@ -379,6 +381,16 @@ Also: `vulnwatch_run_timestamp_seconds`, `vulnwatch_run_duration_seconds`,
 `vulnwatch_kernel_findings_filtered`, `vulnwatch_warnings`,
 `vulnwatch_build_info`. Without tenants every series has `tenant="local"`,
 `environment="default"` (or the names set at the top of stack.yaml).
+
+The two triage families are set only when at least one Claude request got a response, all four
+token types with zeros included. They are per run, not per tenant. A run that
+fails before the report is built pushes health metrics only, so the families
+keep the last successful run's values and the tokens of the failed run are not
+exported. The same numbers are in the `triage usage` log line and in the JSON
+report as `triage_usage` (`model`, `requests`, `input_tokens`, `output_tokens`,
+`cache_creation_input_tokens`, `cache_read_input_tokens`), absent when no
+Claude request got a response. The tenant dashboard shows them in the panels **Triage tokens
+per run** and **Triage requests**, in the row "Runs and sources".
 
 The metrics describe each tenant's inventory: `vulnwatch_product_info`,
 `vulnwatch_product_upgrade_info` and

@@ -62,6 +62,32 @@ type Completer interface {
 	Complete(ctx context.Context, system, user string, schema map[string]any) (string, error)
 }
 
+// Usage is what Claude requests used: the requests that got a response and
+// their tokens.
+type Usage struct {
+	Requests                 int64
+	InputTokens              int64
+	OutputTokens             int64
+	CacheCreationInputTokens int64
+	CacheReadInputTokens     int64
+}
+
+// Add sums two usages.
+func (u Usage) Add(o Usage) Usage {
+	return Usage{
+		Requests:                 u.Requests + o.Requests,
+		InputTokens:              u.InputTokens + o.InputTokens,
+		OutputTokens:             u.OutputTokens + o.OutputTokens,
+		CacheCreationInputTokens: u.CacheCreationInputTokens + o.CacheCreationInputTokens,
+		CacheReadInputTokens:     u.CacheReadInputTokens + o.CacheReadInputTokens,
+	}
+}
+
+// UsageReporter is implemented by a Completer that knows what it used.
+type UsageReporter interface {
+	Usage() Usage
+}
+
 // Triager runs batched triage.
 type Triager struct {
 	cfg config.Triage
@@ -87,6 +113,17 @@ func (t *Triager) WithBudget(n int) *Triager {
 	c := *t
 	c.cfg.MaxFindings = max(min(n, t.cfg.MaxFindings), 0)
 	return &c
+}
+
+// Usage returns the model and the total usage of the completer, shared by
+// every WithBudget copy; ok is false when there is no completer or it does
+// not report usage.
+func (t *Triager) Usage() (model string, u Usage, ok bool) {
+	r, isReporter := t.c.(UsageReporter)
+	if !isReporter {
+		return "", Usage{}, false
+	}
+	return t.cfg.Model, r.Usage(), true
 }
 
 // Stats counts the batches Triage sent to Claude.
