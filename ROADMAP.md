@@ -6,8 +6,10 @@ tool built for that (see Integrations).
 
 ## Inventory
 
-- **Drift check in the CronJob:** run `stack diff` in-cluster (read-only
-  ClusterRole) and report unwatched products and stale versions in Slack.
+- **Auto-discovery in the cluster:** the run reads the stack of the cluster it
+  runs in (read-only ClusterRole) instead of a `stack.yaml` kept up to date by
+  hand, and reports what it does not watch. Criticality, exposure and products
+  outside the cluster stay in the file; other clusters stay with `stack merge`.
 - **SBOM export:** `stack discover --format cyclonedx` for audits and other tools.
 - **Products inside images:** read trivy-operator's SBOMReports to find
   bundled software (e.g. a Keycloak jar in another image).
@@ -22,8 +24,9 @@ tool built for that (see Integrations).
 - **HashiCorp bulletins:** Vault advisories with a keyword filter.
 - **End of life:** endoflife.date warnings before a product, chart or OS
   release goes out of support.
-- **Vendor CSAF feeds:** Red Hat, SUSE, Cisco and others for products without
-  OSV data.
+- **Vendor CSAF feeds:** Red Hat, SUSE, Cisco and others as a source of
+  findings for products without OSV data. Today the Red Hat Security Data API
+  only adds a rating and a statement to findings from other sources.
 - **Full node coverage:** optional package scan of the nodes (Vuls or Trivy
   rootfs) for more than the kernel.
 - **cvelistV5 names for the whole catalog:** products without them are
@@ -51,7 +54,7 @@ tool built for that (see Integrations).
 - **Dependency-Track:** push the stack as an SBOM and use its audit workflow
   and UI; vulnwatch keeps the Slack summary.
 - **DefectDojo:** export findings for teams that track SLAs and compliance there.
-- **More outputs:** Microsoft Teams, generic webhook, email digest.
+- **Email digest:** the daily summary by email.
 - **Grafana annotations:** mark new P1 findings on dashboards.
 
 ## Distribution
@@ -60,7 +63,6 @@ tool built for that (see Integrations).
   binaries.
 - **Build provenance:** SLSA provenance attestations for the image and the
   binaries, next to the cosign signatures.
-- **Artifact Hub:** list the Helm chart there.
 - **Easier install:** a Homebrew formula or an install script instead of a
   manual download.
 
