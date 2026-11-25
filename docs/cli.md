@@ -4,7 +4,7 @@
 
 ```
 vulnwatch run                  the daily run
-  --output stdout,json,html,slack   (default stdout)
+  --output stdout,json,html,slack,webhook,pagerduty,teams   (default stdout)
   --html-path report.html  --json-path -     (- = stdout)
   --dry-run                    no state writes, no Slack
   --since 2026-10-01           override the window start
