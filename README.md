@@ -31,8 +31,8 @@ You describe what you run in one `stack.yaml`, or generate it from your
 clusters. vulnwatch checks the right advisory sources for each product,
 confirms what really runs with Trivy, adds exploitation data, matches every
 advisory against your versions and lets Claude explain what's new in plain
-words. You get a short Slack message, Grafana dashboards and an action for
-every finding.
+words. You get a short message in Slack or Microsoft Teams, Grafana
+dashboards and an action for every finding.
 
 ```mermaid
 %%{init: {"htmlLabels": false, "flowchart": {"htmlLabels": false}, "theme": "base", "themeVariables": {"lineColor": "#8A948F", "titleColor": "#FFFFFF", "primaryTextColor": "#FFFFFF", "textColor": "#7A8781"}}}%%
@@ -43,7 +43,7 @@ flowchart LR
     stack["stack.yaml<br/>Helm charts · products<br/>node OS · tenants"]
   end
   subgraph feeds["Vulnerability data"]
-    adv["GitHub advisories · OSV · NVD<br/>Kubernetes CVE feed · vendor RSS"]
+    adv["GitHub advisories · OSV · CVE records<br/>NVD · Kubernetes CVE feed · vendor RSS"]
     distro["Distribution security data<br/>Debian · Ubuntu · RHEL · SUSE"]
     trivy["trivy-operator<br/>running images"]
     exploit["CISA KEV · FIRST EPSS<br/>exploitation"]
@@ -57,7 +57,8 @@ flowchart LR
   vw(["vulnwatch<br/>daily CronJob"])
   vw <--> claude["Claude<br/>triage"]
   vw <--> db[("SQLite<br/>state")]
-  vw --> slack["Slack<br/>run summary · P1 alerts"]
+  vw --> chat["Slack · Microsoft Teams<br/>run summary · P1 alerts"]
+  vw --> hooks["Webhook · PagerDuty<br/>your own systems · on-call"]
   vw --> grafana["Prometheus · Grafana<br/>overview · tenant dashboards"]
   vw --> reports["HTML · JSON · stdout"]
 
@@ -72,7 +73,7 @@ flowchart LR
   class adv,distro,trivy,exploit source
   class vw core
   class claude,db support
-  class slack,grafana,reports output
+  class chat,hooks,grafana,reports output
   style you fill:#14213A,stroke:#3B82F6,color:#FFFFFF,stroke-width:2px,stroke-dasharray:6 4
   style feeds fill:#2B1D0C,stroke:#D97706,color:#FFFFFF,stroke-width:2px,stroke-dasharray:6 4
 ```
@@ -85,20 +86,26 @@ what to patch today.
 - **Starts from what you run.** One `stack.yaml`, generated from the cluster,
   covers Helm charts, images, the Kubernetes distribution, the nodes' kernel
   and software outside the cluster (GitLab, toolchains).
-- **Right source per product.** Vendor advisories, OSV, NVD, the Kubernetes
-  CVE feed and vendor RSS report issues before patched images exist; Trivy
-  confirms what actually runs.
+- **Right source per product.** Vendor advisories, OSV, CVE records, NVD, the
+  Kubernetes CVE feed and vendor RSS report issues before patched images
+  exist; Trivy confirms what actually runs.
 - **Few alerts, prioritised.** Only new or materially changed findings.
   Claude weighs the version match, exposure, criticality, KEV, CISA's SSVC
   and EPSS and explains the priority; rules set a floor and stand in without Claude, so
   thousands of image and kernel CVEs shrink to the handful that matter.
 - **Every finding comes with an action.** What to upgrade to, and per product
   the one version that fixes everything open.
+- **A view of the week.** An optional weekly report per Slack channel: what
+  is open, what was found and closed since the last one, and what has been
+  open the longest.
+- **News before the advisory.** `vulnwatch news` posts new security bulletins
+  to Slack and names the products you run that they mention; see
+  [Security news](docs/how-it-works.md#security-news).
 - **One instance, many tenants.** Customers, organizations or teams, each with
   its environments, Slack channels and dashboard; advisories are fetched once
   for all of them.
 - **Small to run.** One binary with its defaults built in, one CronJob, SQLite
-  state, Slack and Prometheus. No database server, no UI to operate.
+  state, Slack or Teams, and Prometheus. No database server, no UI to operate.
 
 It is not a vulnerability management platform: no ticketing, SLAs or
 compliance reports. For those, feed a tool such as OWASP Dependency-Track or
@@ -178,18 +185,18 @@ products:                # everything else
 
 ## Documentation
 
-| Topic                                  | What is in it                                                                                    |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| [How it works](docs/how-it-works.md)   | a run step by step, sources, version matching, node kernel, Trivy, known limitations             |
-| [Configuration](docs/configuration.md) | `stack.yaml`, generating it from a cluster, `config.yaml`, `sources.yaml`, environment variables |
-| [Tenants](docs/tenants.md)             | customers, organizations or teams with their own environments, channels and dashboards           |
-| [Commands and logging](docs/cli.md)    | every command and flag, log levels, the audit log                                                |
-| [Outputs and metrics](docs/outputs.md) | Slack, HTML, JSON, Prometheus metrics, Grafana dashboards, alerts                                |
-| [Deployment](docs/deployment.md)       | Docker; Kubernetes is in the [chart README](charts/vulnwatch/README.md)                          |
-| [Security](docs/security.md)           | how vulnwatch is hardened, verifying release signatures                                          |
-| [Threat model](docs/threat-model.md)   | what can go wrong and what stops it                                                              |
-| [Development](docs/development.md)     | building, testing, adding a product, releasing                                                   |
-| [Roadmap](ROADMAP.md)                  | ideas for what could come next                                                                   |
+| Topic                                  | What is in it                                                                                                             |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| [How it works](docs/how-it-works.md)   | a run step by step, sources, version matching, node kernel, Trivy, known limitations                                      |
+| [Configuration](docs/configuration.md) | `stack.yaml`, generating it from a cluster, `config.yaml`, `sources.yaml`, environment variables                          |
+| [Tenants](docs/tenants.md)             | customers, organizations or teams with their own environments, channels and dashboards                                    |
+| [Commands and logging](docs/cli.md)    | every command and flag, log levels, the audit log                                                                         |
+| [Outputs and metrics](docs/outputs.md) | Slack, Microsoft Teams, webhook, PagerDuty, HTML, JSON, the weekly report, Prometheus metrics, Grafana dashboards, alerts |
+| [Deployment](docs/deployment.md)       | Docker; Kubernetes is in the [chart README](charts/vulnwatch/README.md)                                                   |
+| [Security](docs/security.md)           | how vulnwatch is hardened, verifying release signatures                                                                   |
+| [Threat model](docs/threat-model.md)   | what can go wrong and what stops it                                                                                       |
+| [Development](docs/development.md)     | building, testing, adding a product, releasing                                                                            |
+| [Roadmap](ROADMAP.md)                  | ideas for what could come next                                                                                            |
 
 ## Security
 
