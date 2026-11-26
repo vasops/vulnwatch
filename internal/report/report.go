@@ -74,6 +74,11 @@ type Report struct {
 	// API error, or invalid output after the retry. Their findings got the
 	// rule-based priority. Run-wide: every route keeps it.
 	TriageFailures int `json:"triage_failures,omitempty"`
+	// TriageUntriaged counts the findings those failures left with the
+	// rule-based priority (asked again in a later run); TriageFailure says
+	// why the first batch failed.
+	TriageUntriaged int    `json:"triage_untriaged,omitempty"`
+	TriageFailure   string `json:"triage_failure,omitempty"`
 	// TriageUsage is what the Claude triage requests of the run used; absent
 	// when triage made no request.
 	TriageUsage *TriageUsage `json:"triage_usage,omitempty"`
@@ -269,6 +274,8 @@ type Meta struct {
 	KernelFiltered  int
 	SingleSource    map[string]int
 	TriageFailures  int
+	TriageUntriaged int
+	TriageFailure   string
 	TriageUsage     *TriageUsage
 	// Weekly, when set, asks for the weekly report: its window (From,
 	// Until) and closed findings; Build fills in the rest.
@@ -295,6 +302,8 @@ func Build(m Meta, entries []Entry) Report {
 		KernelFiltered:  m.KernelFiltered,
 		SingleSource:    m.SingleSource,
 		TriageFailures:  m.TriageFailures,
+		TriageUntriaged: m.TriageUntriaged,
+		TriageFailure:   m.TriageFailure,
 		TriageUsage:     m.TriageUsage,
 	}
 	seen := map[config.Scope]bool{}
