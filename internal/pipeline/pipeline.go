@@ -737,9 +737,11 @@ func Run(ctx context.Context, o Options) (*report.Report, error) {
 		Open: open, OpenUnknown: openUnknown, Sources: stats, Baselines: baselines,
 		Links:         AdvisoryLinks(o.Config),
 		ImageFiltered: img.filtered, UnmatchedImages: img.unmatched, KernelFiltered: osFiltered,
-		SingleSource:   singleSource,
-		TriageFailures: tst.Failed,
-		TriageUsage:    usage,
+		SingleSource:    singleSource,
+		TriageFailures:  tst.Failed,
+		TriageUntriaged: tst.Untriaged,
+		TriageFailure:   tst.Reason,
+		TriageUsage:     usage,
 	}
 	switch {
 	case o.Bootstrap:
