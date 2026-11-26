@@ -225,8 +225,8 @@ func TestTriageStats(t *testing.T) {
 		dead    bool
 	}{
 		{"all answered", &fakeCompleter{replies: []string{ok, ok, ok}}, true, Stats{Batches: 3, Answered: 3}, false},
-		{"one invalid twice", &fakeCompleter{replies: []string{"garbage", "garbage", ok, ok}}, true, Stats{Batches: 3, Failed: 1, Answered: 2}, false},
-		{"every call fails", &fakeCompleter{}, true, Stats{Batches: 1, Failed: 1, APIError: true}, true},
+		{"one invalid twice", &fakeCompleter{replies: []string{"garbage", "garbage", ok, ok}}, true, Stats{Batches: 3, Failed: 1, Answered: 2, Untriaged: 1, Reason: "invalid output"}, false},
+		{"every call fails", &fakeCompleter{}, true, Stats{Batches: 1, Failed: 1, APIError: true, Untriaged: 3, Reason: "Claude API error"}, true},
 		{"disabled", &fakeCompleter{}, false, Stats{}, false},
 	}
 	for _, tt := range tests {
@@ -250,7 +250,7 @@ func TestTriageStopsAfterAPIError(t *testing.T) {
 	}
 	fc := &fakeCompleter{replies: []string{ok}, errs: []error{nil, errors.New("timeout")}}
 	res, st := New(config.Triage{Enabled: true, MaxFindings: 10, BatchSize: 1}, fc, quietLog()).Triage(context.Background(), items)
-	if fc.calls != 2 || st != (Stats{Batches: 2, Failed: 1, Answered: 1, APIError: true}) {
+	if fc.calls != 2 || st != (Stats{Batches: 2, Failed: 1, Answered: 1, APIError: true, Untriaged: 2, Reason: "Claude API error"}) {
 		t.Fatalf("calls=%d stats=%+v", fc.calls, st)
 	}
 	if r := res[items[0].Key()]; r.Method != MethodLLM {
@@ -261,6 +261,63 @@ func TestTriageStopsAfterAPIError(t *testing.T) {
 	}
 	if r := res[items[2].Key()]; r.Method != MethodFallback || !strings.Contains(r.Note, "failed earlier in this run") {
 		t.Errorf("the batch not sent falls back: %+v", r)
+	}
+}
+
+// An answer cut off at max_tokens is asked again in two halves, so a batch
+// too big for the output limit still gets Claude's verdicts.
+func TestTriageSplitsTruncatedBatch(t *testing.T) {
+	two := `{"results":[{"key":"f1","relevant":"yes","priority":"P2","summary":"s","reasoning":"r","action":"a"},` +
+		`{"key":"f2","relevant":"yes","priority":"P2","summary":"s","reasoning":"r","action":"a"}]}`
+	items := []Item{
+		item("CVE-1", "keycloak", "affected", 9.8, false, "internet"),
+		item("CVE-2", "keycloak", "affected", 8.1, false, "internet"),
+		item("CVE-3", "keycloak", "affected", 7.0, false, "internet"),
+		item("CVE-4", "keycloak", "affected", 5.0, false, "internet"),
+	}
+	fc := &fakeCompleter{replies: []string{"", two, two}, errs: []error{ErrTruncated}}
+	res, st := New(config.Triage{Enabled: true, MaxFindings: 10, BatchSize: 4}, fc, quietLog()).Triage(context.Background(), items)
+	if fc.calls != 3 || st != (Stats{Batches: 1, Answered: 1}) {
+		t.Fatalf("calls=%d stats=%+v", fc.calls, st)
+	}
+	for _, it := range items {
+		if r := res[it.Key()]; r.Method != MethodLLM {
+			t.Errorf("%s: %+v", it.Finding.ID, r)
+		}
+	}
+	if !strings.Contains(fc.prompts[1], "CVE-1") || strings.Contains(fc.prompts[1], "CVE-3") || !strings.Contains(fc.prompts[2], "CVE-4") {
+		t.Errorf("each half is asked on its own: %q", fc.prompts[1:])
+	}
+}
+
+// A truncated or refused answer is not an API failure: the batches after it
+// are still sent, and the reason reaches the stats and the note.
+func TestTriageUnusableAnswerDoesNotStopTheRun(t *testing.T) {
+	ok := `{"results":[{"key":"f1","relevant":"yes","priority":"P2","summary":"s","reasoning":"r","action":"a"}]}`
+	for _, tt := range []struct {
+		err    error
+		reason string
+	}{
+		{ErrTruncated, "output truncated at max_tokens"},
+		{ErrRefused, "the model refused"},
+	} {
+		t.Run(tt.reason, func(t *testing.T) {
+			items := []Item{
+				item("CVE-1", "keycloak", "affected", 9.8, false, "internet"),
+				item("CVE-2", "keycloak", "affected", 8.1, false, "internet"),
+			}
+			fc := &fakeCompleter{replies: []string{"", ok}, errs: []error{tt.err}}
+			res, st := New(config.Triage{Enabled: true, MaxFindings: 10, BatchSize: 1}, fc, quietLog()).Triage(context.Background(), items)
+			if fc.calls != 2 || st != (Stats{Batches: 2, Failed: 1, Answered: 1, Untriaged: 1, Reason: tt.reason}) {
+				t.Fatalf("calls=%d stats=%+v", fc.calls, st)
+			}
+			if r := res[items[0].Key()]; r.Method != MethodFallback || !strings.Contains(r.Note, tt.reason) {
+				t.Errorf("the failed batch falls back with the reason: %+v", r)
+			}
+			if r := res[items[1].Key()]; r.Method != MethodLLM {
+				t.Errorf("the next batch is still sent: %+v", r)
+			}
+		})
 	}
 }
 
@@ -415,8 +472,8 @@ func TestAnthropicCompleterCountsTruncatedResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 	a := NewAnthropic(config.Triage{Model: "claude-test", MaxTokens: 100, BaseURL: srv.URL, Timeout: config.Duration(5 * time.Second)}, "sk-test", nil)
-	if _, err := a.Complete(context.Background(), "sys", "user", outputSchema); err == nil {
-		t.Fatal("a truncated answer is an error")
+	if _, err := a.Complete(context.Background(), "sys", "user", outputSchema); !errors.Is(err, ErrTruncated) {
+		t.Fatalf("a truncated answer is ErrTruncated, got %v", err)
 	}
 	want := Usage{Requests: 1, InputTokens: 7, OutputTokens: 100, CacheCreationInputTokens: 3, CacheReadInputTokens: 4}
 	if got := a.Usage(); got != want {

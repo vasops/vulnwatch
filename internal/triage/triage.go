@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 
@@ -134,11 +135,19 @@ type Stats struct {
 	// APIError: an API call failed, so the batches after it were not sent
 	// (not counted in Batches or Failed); their findings get the rules.
 	APIError bool
+	// Untriaged counts the findings left without a verdict by a failed
+	// batch or one not sent after an API error.
+	Untriaged int
+	// Reason is why the first failed batch failed, as Reason words it.
+	Reason string
 }
 
 // Add sums the stats of two Triage calls.
 func (s Stats) Add(o Stats) Stats {
-	return Stats{s.Batches + o.Batches, s.Failed + o.Failed, s.Answered + o.Answered, s.APIError || o.APIError}
+	return Stats{
+		Batches: s.Batches + o.Batches, Failed: s.Failed + o.Failed, Answered: s.Answered + o.Answered,
+		APIError: s.APIError || o.APIError, Untriaged: s.Untriaged + o.Untriaged, Reason: cmp.Or(s.Reason, o.Reason),
+	}
 }
 
 // Dead reports that Claude was asked and answered nothing: a bad API key or
@@ -147,6 +156,29 @@ func (s Stats) Dead() bool { return s.Batches > 0 && s.Answered == 0 }
 
 // errAPI marks a failed API call, as opposed to invalid output.
 var errAPI = errors.New("API call failed")
+
+// Answers that came back but can't be used. The API works, so unlike errAPI
+// they don't stop the batches after them.
+var (
+	ErrTruncated = errors.New("model output truncated at max_tokens")
+	ErrRefused   = errors.New("model refused the request")
+	ErrNoText    = errors.New("no text in response")
+)
+
+// Reason words why a batch failed, short enough for a report headline.
+func Reason(err error) string {
+	switch {
+	case errors.Is(err, errAPI):
+		return "Claude API error"
+	case errors.Is(err, ErrTruncated):
+		return "output truncated at max_tokens"
+	case errors.Is(err, ErrRefused):
+		return "the model refused"
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		return "run deadline"
+	}
+	return "invalid output"
+}
 
 // Triage returns one result per item, keyed by Item.Key. It never fails:
 // LLM errors degrade to deterministic results marked as not triaged, and
@@ -189,10 +221,8 @@ func (t *Triager) Triage(ctx context.Context, items []Item) (map[string]Result, 
 	for start := 0; start < len(llm); start += batch {
 		chunk := llm[start:min(start+batch, len(llm))]
 		var res map[string]Result
-		note := "not triaged: LLM output invalid or unavailable"
-		if st.APIError {
-			note = "not triaged: the Claude API failed earlier in this run"
-		} else {
+		note := "not triaged: the Claude API failed earlier in this run"
+		if !st.APIError {
 			var err error
 			res, err = t.runBatch(ctx, chunk)
 			st.Batches++
@@ -202,6 +232,8 @@ func (t *Triager) Triage(ctx context.Context, items []Item) (map[string]Result, 
 			if err != nil {
 				st.Failed++
 				st.APIError = errors.Is(err, errAPI)
+				st.Reason = cmp.Or(st.Reason, Reason(err))
+				note = "not triaged: LLM output invalid or unavailable (" + Reason(err) + ")"
 				t.log.Warn("LLM triage failed, using deterministic fallback", "batch_size", len(chunk), "triaged", len(res), "err", err)
 				if st.APIError && start+batch < len(llm) {
 					t.log.Warn("Claude API failed: the remaining findings are not sent", "findings", len(llm)-start-batch)
@@ -213,6 +245,7 @@ func (t *Triager) Triage(ctx context.Context, items []Item) (map[string]Result, 
 				out[it.Key()] = t.guard(ctx, it, r)
 				continue
 			}
+			st.Untriaged++
 			r := Deterministic(it)
 			r.Note = note
 			out[it.Key()] = r
@@ -258,9 +291,10 @@ func (t *Triager) guard(ctx context.Context, it Item, r Result) Result {
 }
 
 // runBatch calls the model and validates; the items without a valid result
-// are sent once more. It returns the valid results, and an error when some
-// items have none: errAPI when the call itself failed (not retried here,
-// the client retries).
+// are sent once more. An answer cut off at max_tokens is asked again in two
+// halves, down to one item. It returns the valid results, and an error when
+// some items have none: errAPI when the call itself failed (not retried
+// here, the client retries).
 func (t *Triager) runBatch(ctx context.Context, items []Item) (map[string]Result, error) {
 	sys := systemPrompt(t.cfg.Language)
 	got := map[string]Result{}
@@ -275,6 +309,17 @@ func (t *Triager) runBatch(ctx context.Context, items []Item) (map[string]Result
 			return got, err
 		}
 		raw, err := t.c.Complete(ctx, sys, user, outputSchema)
+		if errors.Is(err, ErrTruncated) && len(items) > 1 {
+			t.log.Info("Claude output truncated at max_tokens, splitting the batch", "batch_size", len(items))
+			return t.splitBatch(ctx, items, got)
+		}
+		if errors.Is(err, ErrTruncated) || errors.Is(err, ErrRefused) {
+			return got, err
+		}
+		if errors.Is(err, ErrNoText) {
+			lastErr = err
+			continue
+		}
 		if err != nil {
 			return got, fmt.Errorf("%w: %w", errAPI, err)
 		}
@@ -292,6 +337,24 @@ func (t *Triager) runBatch(ctx context.Context, items []Item) (map[string]Result
 		items = slices.DeleteFunc(items, func(it Item) bool { _, ok := got[it.Key()]; return ok })
 	}
 	return got, lastErr
+}
+
+// splitBatch sends the two halves of items as batches of their own and adds
+// their results to got. After an API error the second half is not sent.
+func (t *Triager) splitBatch(ctx context.Context, items []Item, got map[string]Result) (map[string]Result, error) {
+	mid := len(items) / 2
+	var errs []error
+	for _, half := range [][]Item{items[:mid], items[mid:]} {
+		res, err := t.runBatch(ctx, half)
+		maps.Copy(got, res)
+		if err != nil {
+			errs = append(errs, err)
+			if errors.Is(err, errAPI) {
+				break
+			}
+		}
+	}
+	return got, errors.Join(errs...)
 }
 
 type llmOutput struct {

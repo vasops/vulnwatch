@@ -2,7 +2,6 @@ package triage
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -65,9 +64,9 @@ func (a *Anthropic) Complete(ctx context.Context, system, user string, schema ma
 	a.record(msg.Usage)
 	switch msg.StopReason {
 	case anthropic.StopReasonMaxTokens:
-		return "", errors.New("model output truncated at max_tokens")
+		return "", ErrTruncated
 	case anthropic.StopReasonRefusal:
-		return "", errors.New("model refused the request")
+		return "", ErrRefused
 	}
 	var sb strings.Builder
 	for _, b := range msg.Content {
@@ -76,7 +75,7 @@ func (a *Anthropic) Complete(ctx context.Context, system, user string, schema ma
 		}
 	}
 	if sb.Len() == 0 {
-		return "", fmt.Errorf("no text in response (stop reason %s)", msg.StopReason)
+		return "", fmt.Errorf("%w (stop reason %s)", ErrNoText, msg.StopReason)
 	}
 	return sb.String(), nil
 }
