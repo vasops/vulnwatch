@@ -33,7 +33,8 @@ func TestRenderRoutesTenants(t *testing.T) {
 	}
 	now := time.Date(2026, 11, 6, 6, 0, 0, 0, time.UTC)
 	rep := report.Build(report.Meta{Mode: report.ModeRun, GeneratedAt: now, Since: now.Add(-24 * time.Hour), Until: now,
-		Products: []catalog.Product{local, acme, globex}, Warnings: []string{"nvd/keycloak: timeout"}, TriageFailures: 2},
+		Products: []catalog.Product{local, acme, globex}, Warnings: []string{"nvd/keycloak: timeout"},
+		TriageFailures: 2, TriageUntriaged: 7, TriageFailure: "output truncated at max_tokens"},
 		[]report.Entry{entry("CVE-L", "P3", local), entry("CVE-A", "P1", acme), entry("CVE-G", "P2", globex)})
 	if err := o.Render(context.Background(), rep); err != nil {
 		t.Fatal(err)
@@ -55,7 +56,7 @@ func TestRenderRoutesTenants(t *testing.T) {
 	}
 	// Every channel learns its priorities may be rule-based (#41).
 	for _, sum := range []string{def, acmeSum} {
-		if !strings.Contains(sum, ":warning: Claude triage failed 2 times; priorities are rule-based") {
+		if !strings.Contains(sum, ":warning: Claude gave no verdict for 7 findings (output truncated at max_tokens): rule-based priority until a later run asks again") {
 			t.Errorf("triage failures missing:\n%s", sum)
 		}
 	}

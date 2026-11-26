@@ -266,6 +266,21 @@ func sum(cs []report.PriorityCount) int {
 	return n
 }
 
+// triageFailureLine says how many findings Claude gave no verdict for and
+// why; they keep the rule-based priority until a later run asks again.
+func triageFailureLine(r report.Report) string {
+	why := ""
+	if r.TriageFailure != "" {
+		why = " (" + r.TriageFailure + ")"
+	}
+	n := r.TriageUntriaged
+	if n == 0 {
+		return fmt.Sprintf(":warning: Claude triage failed in %d %s%s", r.TriageFailures, plural(r.TriageFailures, "batch", "batches"), why)
+	}
+	return fmt.Sprintf(":warning: Claude gave no verdict for %d %s%s: rule-based priority until a later run asks again",
+		n, plural(n, "finding", "findings"), why)
+}
+
 // summaryBlocks is the per-run message: counts, one section per finding and
 // where to look. failed names the sources that failed in the run (for every
 // route; the warning count only where the run's warnings are kept).
@@ -279,8 +294,8 @@ func summaryBlocks(r report.Report, scopes, dash string, p1 p1Count, alertChanne
 	if p1.findings > 0 {
 		head = append(head, fmt.Sprintf(":rotating_light: *%d critical (P1) %s%s*, see <#%s>", p1.findings, plural(p1.findings, "finding", "findings"), inEnvironments(p1.findings, p1.scopes), alertChannel))
 	}
-	if n := r.TriageFailures; n > 0 { // run-wide: on every route
-		head = append(head, fmt.Sprintf(":warning: Claude triage failed %d %s; priorities are rule-based", n, plural(n, "time", "times")))
+	if r.TriageFailures > 0 { // run-wide: on every route
+		head = append(head, triageFailureLine(r))
 	}
 	findings := report.Findings(r.Items())
 	counts := report.Count(findings)
