@@ -67,11 +67,14 @@ flowchart LR
    summary and the action. Invalid answers are retried once; after that, or
    above `triage.max_findings`, a rule-based priority is used and marked *not
    triaged*, and a later run with budget left asks Claude again (without
-   reporting it again). After a failed API call (retried once) the run sends
-   Claude nothing more. Failed calls are counted
+   reporting it again). An answer cut off at `triage.max_tokens` is asked
+   again in two halves, down to one finding. After a failed API call (retried
+   once) the run sends Claude nothing more; a truncated or refused answer
+   does not stop the batches after it. Failed calls are counted
    (`vulnwatch_triage_failures`, alert `VulnwatchTriageFailing`) and the Slack
-   summary says priorities are rule-based; a run in which Claude answered
-   nothing (a bad API key or model name) fails after reporting. When a
+   summary says how many findings got no verdict and why; a run in which
+   Claude answered nothing (a bad API key or model name) fails after
+   reporting. When a
    product's exposure or criticality changes, a
    still-open finding gets the more urgent of Claude's priority and the
    rules' priority now. The rules weigh KEV, CVSS, exposure and criticality;
